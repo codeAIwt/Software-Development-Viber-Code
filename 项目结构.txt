@@ -1,0 +1,60 @@
+project/
+├── frontend/                # 前端Vue项目
+│   ├── public/              # 静态资源
+│   ├── src/
+│   │   ├── api/             # 接口请求封装
+│   │   │   ├── user.js      # 用户系统接口
+│   │   │   ├── studyRoom.js # 自习室接口
+│   │   │   ├── duration.js  # 自习时长接口
+│   │   ├── assets/          # 图片、样式等资源
+│   │   ├── components/      # 通用组件
+│   │   │   ├── CommonToast.vue # 全局Toast组件
+│   │   │   ├── PrivacyMode.vue # 隐私模式切换组件
+│   │   │   ├── StudyRoomList.vue # 自习室列表组件
+│   │   ├── router/          # 路由配置
+│   │   │   └── index.js     # 路由表（/login/register/home/personal/study-room等）
+│   │   ├── store/           # 状态管理（用户信息、自习室状态、时长数据）
+│   │   ├── utils/           # 工具函数
+│   │   │   ├── auth.js      # Token缓存、权限校验
+│   │   │   ├── video.js     # 视频流处理（隐私模式）
+│   │   │   ├── calc.js      # 击败百分比计算
+│   │   ├── views/           # 页面视图
+│   │   │   ├── Login.vue    # 登录页
+│   │   │   ├── Register.vue # 注册页
+│   │   │   ├── Home.vue     # 首页
+│   │   │   ├── Personal.vue # 个人中心
+│   │   │   ├── StudyRoom.vue # 自习室主页面
+│   │   │   ├── StudyRoomDetail.vue # 自习室在线伴学页
+│   │   ├── App.vue
+│   │   └── main.js
+│   └── package.json
+├── backend/                 # 后端Python项目
+│   ├── config/              # 配置文件
+│   │   ├── db.py            # MySQL/Redis配置
+│   │   ├── ws.py            # WebSocket配置
+│   │   └── settings.py      # 全局配置（定时任务时间、自习室人数上限等）
+│   ├── controllers/         # 接口控制器
+│   │   ├── user_controller.py # 用户注册/登录/退出
+│   │   ├── room_controller.py # 自习室创建/加入/状态更新
+│   │   ├── duration_controller.py # 时长统计/击败百分比计算
+│   ├── models/              # 数据库模型
+│   │   ├── user.py          # 用户表模型
+│   │   ├── study_duration.py # 学习时长表模型
+│   │   ├── study_room.py    # 自习室表模型
+│   │   └── room_user.py     # 自习室-用户关联表模型
+│   ├── schedule/            # 定时任务
+│   │   └── duration_schedule.py # 每日凌晨4点统计时长
+│   ├── services/            # 业务逻辑层
+│   │   ├── user_service.py  # 用户业务
+│   │   ├── room_service.py  # 自习室匹配/状态管理
+│   │   ├── duration_service.py # 时长计算/缓存更新
+│   ├── utils/               # 工具函数
+│   │   ├── auth.py          # Token生成/验证
+│   │   ├── cache.py         # Redis缓存操作
+│   │   └── ws_client.py     # WebSocket客户端通信
+│   ├── ws/                  # WebSocket服务
+│   │   └── server.py        # 在线伴学实时通信
+│   ├── app.py               # 后端入口（Flask/FastAPI）
+│   └── requirements.txt
+└── docs/                    # 文档
+    └── AI-prd.md            # 修订后的PRD

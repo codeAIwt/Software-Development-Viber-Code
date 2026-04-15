@@ -79,11 +79,35 @@ def _read_room_meta(r, room_id: str) -> dict | None:
     return meta
 
 
+def _check_user_in_any_room(r, user_id: str) -> str | None:
+    """
+    检查用户是否在任何房间中
+    返回用户所在的房间ID，如果不在任何房间中返回None
+    """
+    # 遍历所有主题，检查用户是否在任何房间中
+    themes = ["考研", "期末", "考公", "语言"]
+    for theme in themes:
+        # 获取该主题下的所有房间
+        room_ids = r.zrevrange(cache.rooms_idle_zset_key(theme), 0, -1)
+        for room_id in room_ids:
+            # 检查用户是否在该房间的活跃成员中
+            active_key = _room_users_active_key(room_id)
+            if r.sismember(active_key, user_id):
+                return room_id
+    return None
+
+
 def create_room(db: Session, creator_user_id: str, theme: str, max_people: int, tags: list = None) -> dict:
     if not theme:
         raise RoomServiceError(400, "theme 不能为空", {})
     if not isinstance(max_people, int) or max_people < 1 or max_people > 8:
         raise RoomServiceError(400, "max_people 非法", {})
+    
+    # 检查用户是否已经在其他房间中
+    r = cache._redis()
+    existing_room = _check_user_in_any_room(r, creator_user_id)
+    if existing_room:
+        raise RoomServiceError(400, "需要退出当前自习室才能创建新自习室", {"existing_room_id": existing_room})
 
     # 处理标签
     tags = tags or []
@@ -297,6 +321,11 @@ def list_idle_rooms(db: Session, viewer_user_id: str, theme: str | None) -> dict
 def join_room(db: Session, user_id: str, room_id: str, match_type: MatchType) -> dict:
     r = cache._redis()
     now_ms = _now_ms()
+    
+    # 检查用户是否已经在其他房间中
+    existing_room = _check_user_in_any_room(r, user_id)
+    if existing_room and existing_room != room_id:
+        raise RoomServiceError(400, "需要退出当前自习室才能加入新自习室", {"existing_room_id": existing_room})
 
     if not cache.acquire_room_join_lock(room_id):
         raise RoomServiceError(409, "加入房间超时", {"match_fail_reason": "timeout"})

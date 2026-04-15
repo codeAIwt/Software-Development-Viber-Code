@@ -121,6 +121,8 @@ jobs:
       run: |
         cd frontend
         npm install
+        # 修复权限问题
+        chmod +x node_modules/.bin/vite
         npm run build
         echo "Frontend build completed successfully"
 ```

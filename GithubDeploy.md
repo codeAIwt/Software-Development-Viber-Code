@@ -47,10 +47,10 @@
 2. 添加远程仓库：
    ```bash
    # 使用 HTTPS
-   git remote add origin https://github.com/your-username/your-repository.git
+   git remote add origin https://github.com/codeAIwt/Software-Development-Viber-Code.git
    
    # 或使用 SSH
-   git remote add origin git@github.com:your-username/your-repository.git
+   git remote add origin git@github.com:codeAIwt/Software-Development-Viber-Code.git
    ```
 3. 推送代码到 GitHub：
    ```bash

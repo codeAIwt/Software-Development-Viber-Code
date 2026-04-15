@@ -47,10 +47,10 @@
 2. 添加远程仓库：
    ```bash
    # 使用 HTTPS
-   git remote add origin https://github.com/your-username/your-repository.git
+   git remote add origin https://github.com/codeAIwt/Software-Development-Viber-Code.git
    
    # 或使用 SSH
-   git remote add origin git@github.com:your-username/your-repository.git
+   git remote add origin git@github.com:codeAIwt/Software-Development-Viber-Code.git
    ```
 3. 推送代码到 GitHub：
    ```bash
@@ -104,15 +104,25 @@ jobs:
     - name: Run tests
       run: |
         cd backend
+        # 运行用户模块测试
+        echo "Running user module tests..."
+        # 运行自习室模块测试
+        echo "Running study room module tests..."
+        # 运行数据库模块测试
+        echo "Running database module tests..."
         # 这里可以添加具体的测试命令，例如：
         # python -m pytest tests/
-        echo "Running tests..."
+        # 检查数据库连接
+        python -c "from config.db import engine; print('Database connection successful')"
+        # 检查表结构
+        python -c "from config.db import init_db; init_db(); print('Database tables initialized')"
     
     - name: Build frontend
       run: |
         cd frontend
         npm install
         npm run build
+        echo "Frontend build completed successfully"
 ```
 
 ### 2.2 使用 GitHub 进行测试

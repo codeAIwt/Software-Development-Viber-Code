@@ -58,8 +58,8 @@ async function onLogout() {
       </section>
 
       <section class="grid">
-        <router-link class="tile" to="/study-room">进入自习室模块（占位）</router-link>
-        <div class="tile muted">学习时长排行（即将上线）</div>
+        <router-link class="tile" to="/study-room">进入自习室模块</router-link>
+        <router-link class="tile" to="/rank">学习时长排行</router-link>
       </section>
     </main>
   </div>

@@ -71,6 +71,9 @@ const aiDetectionInterval = ref(10000); // 检测间隔，单位毫秒，默认1
 const aiDetectionEnabled = ref(true); // 是否启用AI检测
 const aiDetectionTimer = ref(null); // 检测定时器
 
+// 房间刷新定时器
+const roomRefreshTimer = ref(null);
+
 // 创建者信息
 const creatorInfo = ref(null);
 const loadingCreatorInfo = ref(false);
@@ -386,7 +389,7 @@ onMounted(async () => {
   }, 1000);
   
   // 定期刷新房间信息，以获取最新的用户列表
-  setInterval(async () => {
+  roomRefreshTimer.value = setInterval(async () => {
     await fetchRoomInfo();
   }, 5000); // 每5秒刷新一次
   
@@ -394,10 +397,14 @@ onMounted(async () => {
   initAiDetection();
 });
 
-// 组件卸载时只停止定时器，不停止摄像头（为后续AI检测做准备）
+// 组件卸载时停止摄像头和定时器
 onUnmounted(() => {
+  stopCamera();
   if (timer.value) {
     clearInterval(timer.value);
+  }
+  if (roomRefreshTimer.value) {
+    clearInterval(roomRefreshTimer.value);
   }
   if (aiDetectionTimer.value) {
     clearInterval(aiDetectionTimer.value);

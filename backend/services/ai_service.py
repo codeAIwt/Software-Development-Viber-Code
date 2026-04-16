@@ -4,18 +4,6 @@ import torch
 import torchvision.transforms as transforms
 from torchvision.models import resnet18
 
-# 加载预训练的ResNet-18模型
-model = resnet18(pretrained=True)
-model.eval()  # 设置为评估模式
-
-# 图像预处理变换
-transform = transforms.Compose([
-    transforms.ToPILImage(),
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-])
-
 
 def detect_person(image_data):
     """
@@ -24,6 +12,18 @@ def detect_person(image_data):
     :return: 是否有人
     """
     try:
+        # 加载预训练的ResNet-18模型
+        model = resnet18(pretrained=True)
+        model.eval()  # 设置为评估模式
+        
+        # 图像预处理变换
+        transform = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+        
         # 转换图像数据
         nparr = np.frombuffer(image_data, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)

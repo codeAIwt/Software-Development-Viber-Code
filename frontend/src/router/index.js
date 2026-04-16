@@ -45,6 +45,12 @@ const routes = [
     component: () => import("../views/Tags.vue"),
     meta: { requiresAuth: true },
   },
+  {
+    path: "/rank",
+    name: "rank",
+    component: () => import("../views/Rank.vue"),
+    meta: { requiresAuth: true },
+  },
 ];
 
 const router = createRouter({

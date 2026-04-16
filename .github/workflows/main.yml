@@ -32,6 +32,6 @@ jobs:
     - name: Build frontend
       run: |
         cd frontend
-        npm install
+     
         npm run build
         echo "Frontend build completed successfully"

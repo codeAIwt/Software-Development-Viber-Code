@@ -168,19 +168,18 @@ def detect_person_api(
     检测摄像头前是否有人
     """
     try:
-        # 验证用户身份，只能检测自己的摄像头
-        if body.user_id != user.id:
-            return _json_err(403, 403, "无权检测其他用户", {})
-        
         # 处理Base64图像
         import base64
-        image_data = base64.b64decode(body.image.split(',')[1])
+        try:
+            image_data = base64.b64decode(body.image.split(',')[1])
+        except (IndexError, ValueError) as e:
+            return _json_err(400, 400, "无效的图片格式")
         
         # 检测是否有人
         has_person = detect_person(image_data)
         
         if not has_person:
-            # 检测到无人，自动退出房间
+            # 检测到无人，自动退出房间，必须使用安全鉴权的 user.id
             room_service.leave_room(db, user.id, body.room_id)
         
         return _json_ok({

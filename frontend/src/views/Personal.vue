@@ -13,34 +13,33 @@ const saving = ref(false);
 const showTagsDialog = ref(false);
 const selectedTags = ref([]);
 
-// 热门标签列表
-const tags = [
-  "考研",
-  "期末考试",
-  "考公",
-  "英语四级",
-  "英语六级",
-  "托福",
-  "雅思",
-  "计算机二级",
-  "教师资格证",
-  "注册会计师",
-  "司法考试",
-  "考研数学",
-  "考研英语",
-  "考研政治",
-  "专业课"
-];
+// 热门标签列表，由系统动态下发
+const tags = ref([]);
 
 async function load() {
-  const { data } = await userApi.fetchProfile();
-  if (data.code !== 200) {
-    ui.showToast(data.msg || "获取资料失败");
-    return;
+  try {
+    const [profileRes, tagsRes] = await Promise.all([
+      userApi.fetchProfile(),
+      userApi
+        .fetchSystemTags()
+        .catch(() => ({ data: { code: 200, data: [] } })),
+    ]);
+
+    if (profileRes.data.code !== 200) {
+      ui.showToast(profileRes.data.msg || "获取资料失败");
+      return;
+    }
+
+    profile.value = profileRes.data.data;
+    nicknameDraft.value = profileRes.data.data.nickname || "";
+    selectedTags.value = profileRes.data.data.tags || [];
+
+    if (tagsRes.data.code === 200) {
+      tags.value = tagsRes.data.data;
+    }
+  } catch (e) {
+    ui.showToast("网络错误：无法获取资源");
   }
-  profile.value = data.data;
-  nicknameDraft.value = data.data.nickname || "";
-  selectedTags.value = data.data.tags || [];
 }
 
 onMounted(load);
@@ -120,7 +119,10 @@ async function saveTags() {
 
     <section v-if="profile" class="card">
       <div class="row">
-        <div class="avatar" :style="{ backgroundImage: `url(${profile.avatar})` }" />
+        <div
+          class="avatar"
+          :style="{ backgroundImage: `url(${profile.avatar})` }"
+        />
         <div>
           <p class="name">{{ profile.nickname }}</p>
           <p class="muted">{{ profile.phone }}</p>
@@ -131,7 +133,12 @@ async function saveTags() {
         <label>昵称</label>
         <div class="inline">
           <input v-model="nicknameDraft" maxlength="20" />
-          <button type="button" class="primary" :disabled="saving" @click="saveNickname">
+          <button
+            type="button"
+            class="primary"
+            :disabled="saving"
+            @click="saveNickname"
+          >
             {{ saving ? "保存中…" : "保存" }}
           </button>
         </div>
@@ -161,10 +168,10 @@ async function saveTags() {
       <div class="dialog">
         <h3>选择学习标签</h3>
         <div class="tags-container dialog-tags">
-          <button 
-            v-for="tag in tags" 
+          <button
+            v-for="tag in tags"
             :key="tag"
-            class="tag" 
+            class="tag"
             :class="{ active: selectedTags.includes(tag) }"
             @click="toggleTag(tag)"
           >
@@ -175,7 +182,12 @@ async function saveTags() {
           <button type="button" class="secondary" @click="closeTagsDialog">
             取消
           </button>
-          <button type="button" class="primary" :disabled="saving" @click="saveTags">
+          <button
+            type="button"
+            class="primary"
+            :disabled="saving"
+            @click="saveTags"
+          >
             {{ saving ? "保存中..." : "保存" }}
           </button>
         </div>

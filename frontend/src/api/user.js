@@ -22,7 +22,7 @@ client.interceptors.response.use(
       clearToken();
     }
     return Promise.reject(err);
-  }
+  },
 );
 
 export function register(phone, password) {
@@ -67,4 +67,11 @@ export function fetchUserInfo(userId) {
  */
 export function fetchCurrentUser() {
   return client.get("/user/profile");
+}
+
+/**
+ * 获取系统配置的标签系统
+ */
+export function fetchSystemTags() {
+  return client.get("/user/tags");
 }

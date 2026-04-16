@@ -7,7 +7,6 @@ from fastapi.responses import JSONResponse
 from config.db import init_db
 from controllers.room_controller import router as room_router
 from controllers.user_controller import router as user_router
-from controllers.duration_controller import router as duration_router
 
 
 @asynccontextmanager
@@ -39,7 +38,6 @@ def create_app() -> FastAPI:
 
     app.include_router(user_router, prefix="/api/user", tags=["user"])
     app.include_router(room_router, prefix="/api/room", tags=["room"])
-    app.include_router(duration_router, prefix="/api/duration", tags=["duration"])
     return app
 
 

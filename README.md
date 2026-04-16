@@ -1,11 +1,15 @@
 # 线上伴学系统
 
 ## 项目简介
-线上伴学系统是一个基于 Vue + Python + Redis 的在线自习室平台，支持用户创建和加入自习室，记录学习时长，提供实时伴学功能。
+
+线上伴学系统是一个基于 Vue 3 + FastAPI + Redis 的在线自习室平台，支持用户创建和加入自习室，记录学习时长，并提供基于 OpenCV 的前置摄像头 AI 伴学监控与 WebSocket 实时状态广播功能。
 
 ## 技术栈
+
 - 前端：Vue 3 + Vite
 - 后端：Python 3.12 + FastAPI
+- AI 识别：OpenCV (Haar Cascade)
+- 实时通信：WebSocket
 - 缓存：Redis
 - 数据库：SQLite（默认）/ MySQL
 - 认证：JWT
@@ -13,26 +17,30 @@
 ## 核心功能
 
 ### 1. 用户系统
+
 - 注册、登录、退出登录
 - 个人信息管理
 - 用户标签选择和管理（首次登录显示标签选择弹窗，可跳过）
 
 ### 2. 自习室管理
+
 - 创建自习室（支持选择主题、人数上限和标签，最多3个标签）
 - 列出空闲自习室（支持主题/标签筛选）
-- 加入自习室
-- 离开自习室
-- 记录用户加入和离开时间
-- 计算学习时长
-- 房间创建者权限：修改房间主题、销毁房间（会强制所有成员退出）
+- 加入自习室/离开自习室
+- 记录用户加入和离开时间，计算学习时长
+- 房间创建者权限：修改房间主题、销毁房间（强制所有成员退出）
+- **基于 WebSocket 的操作广播及更新（如用户加入、离开）**
+- **基于 OpenCV Haar 级联模型的前置摄像头实时在坐校验检测机制**
 
 ### 3. 学习时长统计
+
 - 记录用户在自习室中的学习时长
 - 支持查看个人学习数据
 
 ## 项目结构
 
 ### 后端结构
+
 ```
 backend/
 ├── app.py              # 应用入口
@@ -50,13 +58,18 @@ backend/
 │   └── study_duration.py    # 学习时长模型
 ├── utils/              # 工具函数
 │   ├── auth.py              # 认证相关
-│   └── cache.py             # Redis缓存操作
+│   ├── cache.py             # Redis缓存操作
+│   └── ws_client.py         # WebSocket 连接映射管理
+├── ws/                 # WebSocket 应用包
+│   └── server.py            # 推送与广播逻辑
 └── config/             # 配置
     ├── db.py                # 数据库配置
-    └── settings.py          # 应用配置
+    ├── settings.py          # 应用配置
+    └── ws.py                # WebSocket配置
 ```
 
 ### 前端结构
+
 ```
 frontend/
 ├── src/
@@ -82,6 +95,7 @@ frontend/
 ## 接口说明
 
 ### 房间相关接口
+
 - `POST /api/room/create` - 创建自习室
 - `GET /api/room/list` - 列出自习室
 - `POST /api/room/join` - 加入自习室
@@ -91,6 +105,7 @@ frontend/
 - `DELETE /api/room/destroy/{room_id}` - 销毁房间
 
 ### 用户相关接口
+
 - `POST /api/user/register` - 注册
 - `POST /api/user/login` - 登录
 - `GET /api/user/profile` - 获取用户信息
@@ -98,30 +113,40 @@ frontend/
 - `PUT /api/user/profile/tags` - 更新标签
 
 ### 学习时长相关接口
+
 - `GET /api/duration/info` - 获取学习时长信息
 
 ## 快速开始
 
 ### 后端
-1. 安装依赖
+
+1. 创建虚拟环境并安装依赖（如需开启AI摄像头特性需确保本机支持OpenCV对应的底层组件）
+
    ```bash
    cd backend
+   python -m venv venv
+   source venv/bin/activate  # macOS/Linux
+   # venv\Scripts\activate   # Windows
    pip install -r requirements.txt
    ```
 
 2. 启动服务
    ```bash
    uvicorn app:app --reload
+   # 或者使用 python app.py 根据你的启动脚本情况
    ```
 
 ### 前端
+
 1. 安装依赖
+
    ```bash
    cd frontend
    npm install
    ```
 
 2. 启动开发服务器
+
    ```bash
    npm run dev
    ```
@@ -132,10 +157,12 @@ frontend/
    ```
 
 ## 注意事项
+
 - 本项目使用 Redis 模拟房间状态，实际部署时需要确保 Redis 服务正常运行
--## 数据库功能已接入，默认使用 SQLite，可配置为 MySQL
+  -## 数据库功能已接入，默认使用 SQLite，可配置为 MySQL
 
 ### 数据库连接信息（开发环境）
+
 - **主机地址**：127.0.0.1（本地连接）/ 数据库服务器 IP（远程连接）
 - **端口**：3306
 - **数据库名**：SoftwareProject
@@ -146,18 +173,22 @@ frontend/
 - **远程连接 URL**：mysql+pymysql://UserSoft:SoftP0987@<数据库服务器IP>:3306/SoftwareProject?charset=utf8mb4
 
 ### 账号权限说明
+
 账号 UserSoft 已授予项目开发所需的最小可用权限：
+
 - 对 SoftwareProject 库下所有表：查询 SELECT、新增 INSERT、更新 UPDATE、删除 DELETE、建表/修改表 CREATE, ALTER, DROP、索引管理 INDEX
 - 已配置为允许从任何主机（%）连接，支持远程访问
 
 ### 远程访问数据库步骤
 
 #### 1. 服务器端配置（数据库所在主机）
+
 1. **确保 MySQL 服务已启动**：
+
    ```bash
    # Windows
    net start mysql
-   
+
    # Linux
    systemctl start mysql
    ```
@@ -169,10 +200,11 @@ frontend/
      bind-address = 0.0.0.0
      ```
    - 重启 MySQL 服务：
+
      ```bash
      # Windows
      net restart mysql
-     
+
      # Linux
      systemctl restart mysql
      ```
@@ -185,25 +217,29 @@ frontend/
      选择端口 -> TCP -> 特定本地端口 -> 3306 -> 允许连接
      ```
    - Linux 防火墙：
+
      ```bash
      # CentOS/RHEL
      firewall-cmd --add-port=3306/tcp --permanent
      firewall-cmd --reload
-     
+
      # Ubuntu/Debian
      ufw allow 3306/tcp
      ```
 
 #### 2. 客户端连接（成员电脑）
+
 1. **获取数据库服务器 IP 地址**：
    - 在数据库服务器上执行：
+
      ```bash
      # Windows
      ipconfig
-     
+
      # Linux
      ifconfig
      ```
+
    - 找到服务器的局域网 IP 地址（如 192.168.1.100）
 
 2. **修改项目配置**：
@@ -228,6 +264,7 @@ frontend/
 #### 1. 修改数据库配置
 
 **方法一：修改 settings.py 文件**
+
 1. 打开文件：`backend/config/settings.py`
 2. 找到以下配置行：
    ```python
@@ -241,6 +278,7 @@ frontend/
    ```
 
 **方法二：创建 .env 文件**
+
 1. 在 `backend` 目录下创建 `.env` 文件（如果不存在）
 2. 添加以下内容：
    ```
@@ -249,6 +287,7 @@ frontend/
    （注意：如果已经存在 .env 文件，只需要修改 DATABASE_URL 这一行）
 
 #### 2. 启动服务
+
 1. 确保后端依赖已安装：
    ```bash
    cd backend
@@ -261,16 +300,19 @@ frontend/
 3. 服务启动时会自动创建 SQLite 数据库文件 `online_study.db` 并初始化表结构
 
 #### 3. 验证连接
+
 - 启动服务后，查看控制台输出，确认没有数据库连接错误
 - 数据库文件会生成在 `backend` 目录下，名为 `online_study.db`
 - 可以使用 SQLite 工具（如 DB Browser for SQLite）查看数据库内容
 
 #### 4. 注意事项
+
 - SQLite 适用于开发和测试环境，不建议用于生产环境
 - SQLite 文件会随着数据量的增加而增大，注意定期清理
 - 如果需要切换回 MySQL，只需按照前面的步骤修改数据库配置即可
 
 ### 使用注意事项
+
 - 开发前请确保数据库服务器已启动且可访问
 - 首次使用请先执行项目初始化 SQL 脚本建表
 - 禁止直接在开发库执行危险操作（如 DROP DATABASE）
@@ -357,11 +399,11 @@ uvicorn app:app --reload --host 0.0.0.0 --port 8000
 
 在 `backend` 目录可放置 `.env`（或通过系统环境变量）覆盖配置中的项，例如：
 
-| 变量 | 说明 |
-| --- | --- |
+| 变量           | 说明                                                                                                                                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DATABASE_URL` | 数据库连接串；默认 `sqlite:///./online_study.db`（文件在 `backend` 当前工作目录下生成），开发环境建议使用：`mysql+pymysql://UserSoft:SoftP0987@127.0.0.1:3306/SoftwareProject?charset=utf8mb4` |
-| `redis_url` | 填 `fakeredis` 表示内存模拟 Redis；生产可改为 `redis://127.0.0.1:6379/0` |
-| `JWT_SECRET` | JWT 签名密钥，部署前务必修改为强随机字符串 |
+| `redis_url`    | 填 `fakeredis` 表示内存模拟 Redis；生产可改为 `redis://127.0.0.1:6379/0`                                                                                                                       |
+| `JWT_SECRET`   | JWT 签名密钥，部署前务必修改为强随机字符串                                                                                                                                                     |
 
 ## 前端（Vue + Vite）
 
@@ -377,6 +419,7 @@ npm run dev
 Vite 已将前缀 **`/api`** 代理到 **http://127.0.0.1:8000**，请先按上一节启动后端，再打开浏览器访问前端页面。
 
 **注意**：由于现代浏览器的安全策略，摄像头访问需要在安全上下文（HTTPS）中进行，或者在本地地址（localhost或127.0.0.1）中进行。如果使用私网地址访问，浏览器可能会阻止摄像头访问。此时，您可以：
+
 1. 使用 **http://localhost:5173** 或 **http://127.0.0.1:5173** 访问
 2. 或者在浏览器中为该私网地址启用摄像头访问权限（具体方法因浏览器而异）
 
@@ -408,4 +451,3 @@ npm run build
 - [第一阶段测试预期](./预期成果文件1阶段.md)（MVP 用户模块）
 - [第二阶段测试预期](./预期成果文件2阶段.md)（MVP 自习室模块）
 - [第三阶段测试预期](./预期成果文件3阶段.md)（数据库模块）
-

@@ -21,11 +21,11 @@ const canvasRef = ref(null);
 const cameraOn = ref(true);
 
 // 隐私模式
-const privacyMode = ref('blur'); // blur 或 hand 或 off
+const privacyMode = ref("blur"); // blur 或 hand 或 off
 const privacyModes = [
-  { value: 'blur', label: '模糊模式' },
-  { value: 'hand', label: '手部遮挡模式' },
-  { value: 'off', label: '关闭隐私模式' }
+  { value: "blur", label: "模糊模式" },
+  { value: "hand", label: "手部遮挡模式" },
+  { value: "off", label: "关闭隐私模式" },
 ];
 
 // 视频显示状态
@@ -33,14 +33,14 @@ const videoVisible = ref(true);
 
 // 房间信息
 const roomInfo = ref({
-  creator_id: '',
-  created_ts_ms: '',
-  theme: '',
+  creator_id: "",
+  created_ts_ms: "",
+  theme: "",
   max_people: 0,
   current_people: 0,
-  status: '',
+  status: "",
   tags: [],
-  users: []
+  users: [],
 });
 
 // 用户信息映射
@@ -49,13 +49,13 @@ const loadingUserInfo = ref(false);
 
 // 当前用户是否是创建者
 const isCreator = computed(() => {
-  const currentUserId = localStorage.getItem('user_id');
+  const currentUserId = localStorage.getItem("user_id");
   return currentUserId === roomInfo.value.creator_id;
 });
 
 // 修改主题相关
 const showThemeDialog = ref(false);
-const newTheme = ref('');
+const newTheme = ref("");
 const updatingTheme = ref(false);
 
 // 销毁房间相关
@@ -71,9 +71,6 @@ const aiDetectionInterval = ref(10000); // 检测间隔，单位毫秒，默认1
 const aiDetectionEnabled = ref(true); // 是否启用AI检测
 const aiDetectionTimer = ref(null); // 检测定时器
 
-// 房间刷新定时器
-const roomRefreshTimer = ref(null);
-
 // 创建者信息
 const creatorInfo = ref(null);
 const loadingCreatorInfo = ref(false);
@@ -82,10 +79,11 @@ const loadingCreatorInfo = ref(false);
 const joinTime = ref(Date.now());
 const currentTime = ref(Date.now());
 const timer = ref(null);
+const roomPollingTimer = ref(null);
 
 // 计算属性
 const roomDuration = computed(() => {
-  if (!roomInfo.value.created_ts_ms) return '00:00';
+  if (!roomInfo.value.created_ts_ms) return "00:00";
   const duration = currentTime.value - parseInt(roomInfo.value.created_ts_ms);
   return formatDuration(duration);
 });
@@ -100,7 +98,7 @@ const joinTimeStr = computed(() => {
 });
 
 const createTimeStr = computed(() => {
-  if (!roomInfo.value.created_ts_ms) return '未知';
+  if (!roomInfo.value.created_ts_ms) return "未知";
   return new Date(parseInt(roomInfo.value.created_ts_ms)).toLocaleString();
 });
 
@@ -109,7 +107,7 @@ function formatDuration(ms) {
   const seconds = Math.floor(ms / 1000);
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
-  return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+  return `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
 }
 
 // 获取用户信息
@@ -117,7 +115,7 @@ async function getUserInfo(userId) {
   if (userInfoMap.value.has(userId)) {
     return userInfoMap.value.get(userId);
   }
-  
+
   try {
     const { data } = await userApi.fetchUserInfo(userId);
     if (data.code === 200) {
@@ -139,13 +137,15 @@ async function fetchRoomInfo() {
       // 获取创建者信息
       if (roomInfo.value.creator_id) {
         loadingCreatorInfo.value = true;
-        const { data: creatorData } = await userApi.fetchUserInfo(roomInfo.value.creator_id);
+        const { data: creatorData } = await userApi.fetchUserInfo(
+          roomInfo.value.creator_id,
+        );
         if (creatorData.code === 200) {
           creatorInfo.value = creatorData.data;
         }
         loadingCreatorInfo.value = false;
       }
-      
+
       // 获取房间内所有用户的信息
       if (roomInfo.value.users && roomInfo.value.users.length > 0) {
         loadingUserInfo.value = true;
@@ -156,7 +156,7 @@ async function fetchRoomInfo() {
       }
     }
   } catch (e) {
-    console.error('获取房间信息失败:', e);
+    console.error("获取房间信息失败:", e);
   }
 }
 
@@ -168,18 +168,18 @@ async function initCamera() {
     // 检查浏览器是否支持摄像头功能
     const isSupported = await checkCameraPermission();
     if (!isSupported) {
-      throw new Error('浏览器不支持摄像头功能');
+      throw new Error("浏览器不支持摄像头功能");
     }
-    
+
     await startCamera(videoRef.value);
     // 启动隐私模式处理
     applyPrivacyMode();
   } catch (error) {
     cameraError.value = true;
-    if (error.message === '浏览器不支持摄像头功能') {
-      ui.showToast('浏览器不支持摄像头功能');
+    if (error.message === "浏览器不支持摄像头功能") {
+      ui.showToast("浏览器不支持摄像头功能");
     } else {
-      ui.showToast('无法访问摄像头，请检查权限设置');
+      ui.showToast("无法访问摄像头，请检查权限设置");
     }
   } finally {
     cameraLoading.value = false;
@@ -189,35 +189,35 @@ async function initCamera() {
 // 应用隐私模式
 function applyPrivacyMode() {
   if (!videoRef.value || !canvasRef.value) return;
-  
+
   const video = videoRef.value;
   const canvas = canvasRef.value;
-  const ctx = canvas.getContext('2d');
-  
+  const ctx = canvas.getContext("2d");
+
   // 设置canvas尺寸
   canvas.width = video.videoWidth || 640;
   canvas.height = video.videoHeight || 480;
-  
+
   function draw() {
     if (!cameraOn.value) return;
-    
+
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
-    if (privacyMode.value === 'blur') {
+
+    if (privacyMode.value === "blur") {
       // 模糊模式
-      ctx.filter = 'blur(10px)';
+      ctx.filter = "blur(10px)";
       ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height);
-      ctx.filter = 'none';
-    } else if (privacyMode.value === 'hand') {
+      ctx.filter = "none";
+    } else if (privacyMode.value === "hand") {
       // 手部遮挡模式（简化实现，在画面中上方添加黑色长矩形遮挡）
-      ctx.fillStyle = 'black';
+      ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, canvas.height * 0.6); // 上方60%区域
     }
     // off模式不做处理，直接显示原始画面
-    
+
     requestAnimationFrame(draw);
   }
-  
+
   draw();
 }
 
@@ -238,22 +238,32 @@ function initAiDetection() {
 // 截图并检测
 async function captureAndDetect() {
   if (!videoRef.value || !cameraOn.value) return;
-  
+
   try {
     // 创建临时Canvas用于截图
-    const tempCanvas = document.createElement('canvas');
+    const tempCanvas = document.createElement("canvas");
     tempCanvas.width = videoRef.value.videoWidth || 640;
     tempCanvas.height = videoRef.value.videoHeight || 480;
-    const tempCtx = tempCanvas.getContext('2d');
-    
+    const tempCtx = tempCanvas.getContext("2d");
+
     // 绘制当前视频帧
-    tempCtx.drawImage(videoRef.value, 0, 0, tempCanvas.width, tempCanvas.height);
-    
+    tempCtx.drawImage(
+      videoRef.value,
+      0,
+      0,
+      tempCanvas.width,
+      tempCanvas.height,
+    );
+
     // 转换为Base64
-    const base64Image = tempCanvas.toDataURL('image/jpeg');
-    
+    const base64Image = tempCanvas.toDataURL("image/jpeg");
+
     // 发送到后端进行检测
-    const { data } = await studyRoomApi.detectPerson(base64Image, route.params.id, localStorage.getItem('user_id'));
+    const { data } = await studyRoomApi.detectPerson(
+      base64Image,
+      route.params.id,
+      localStorage.getItem("user_id"),
+    );
     if (data.code === 200) {
       if (!data.data.has_person) {
         // 检测到无人，自动退出房间
@@ -261,7 +271,7 @@ async function captureAndDetect() {
       }
     }
   } catch (error) {
-    console.error('AI检测失败:', error);
+    console.error("AI检测失败:", error);
   }
 }
 
@@ -277,17 +287,17 @@ async function onLeave() {
   try {
     // 先停止摄像头
     stopCamera();
-    
+
     const { data } = await studyRoomApi.leaveRoom(roomId);
     if (data.code !== 200) {
       ui.showToast(data.msg || "退出失败");
       return;
     }
-    
+
     // 显示学习时长弹窗
     studyDuration.value = data.data.study_duration;
     showDurationDialog.value = true;
-    
+
     // 3秒后跳转到房间列表
     setTimeout(() => {
       router.push("/study-room");
@@ -313,22 +323,25 @@ function closeThemeDialog() {
 // 修改主题
 async function updateTheme() {
   if (!newTheme.value) {
-    ui.showToast('请选择主题');
+    ui.showToast("请选择主题");
     return;
   }
-  
+
   updatingTheme.value = true;
   try {
-    const { data } = await studyRoomApi.updateRoom(route.params.id, newTheme.value);
+    const { data } = await studyRoomApi.updateRoom(
+      route.params.id,
+      newTheme.value,
+    );
     if (data.code === 200) {
       roomInfo.value = data.data;
-      ui.showToast('主题修改成功');
+      ui.showToast("主题修改成功");
       closeThemeDialog();
     } else {
-      ui.showToast(data.msg || '修改失败');
+      ui.showToast(data.msg || "修改失败");
     }
   } catch (e) {
-    ui.showToast(e.response?.data?.msg || e.message || '修改失败');
+    ui.showToast(e.response?.data?.msg || e.message || "修改失败");
   } finally {
     updatingTheme.value = false;
   }
@@ -351,13 +364,13 @@ async function destroyRoom() {
     const { data } = await studyRoomApi.destroyRoom(route.params.id);
     if (data.code === 200) {
       stopCamera();
-      ui.showToast('房间已销毁');
-      router.push('/study-room');
+      ui.showToast("房间已销毁");
+      router.push("/study-room");
     } else {
-      ui.showToast(data.msg || '销毁失败');
+      ui.showToast(data.msg || "销毁失败");
     }
   } catch (e) {
-    ui.showToast(e.response?.data?.msg || e.message || '销毁失败');
+    ui.showToast(e.response?.data?.msg || e.message || "销毁失败");
   } finally {
     destroying.value = false;
     closeDestroyDialog();
@@ -370,10 +383,10 @@ async function fetchCurrentUserInfo() {
     const { data } = await userApi.fetchCurrentUser();
     if (data.code === 200) {
       // 存储用户ID到localStorage
-      localStorage.setItem('user_id', data.data.id);
+      localStorage.setItem("user_id", data.data.id);
     }
   } catch (e) {
-    console.error('获取当前用户信息失败:', e);
+    console.error("获取当前用户信息失败:", e);
   }
 }
 
@@ -382,32 +395,37 @@ onMounted(async () => {
   await fetchCurrentUserInfo();
   await fetchRoomInfo();
   initCamera();
-  
+
   // 启动定时器
   timer.value = setInterval(() => {
     currentTime.value = Date.now();
   }, 1000);
-  
+
   // 定期刷新房间信息，以获取最新的用户列表
-  roomRefreshTimer.value = setInterval(async () => {
+  roomPollingTimer.value = setInterval(async () => {
     await fetchRoomInfo();
   }, 5000); // 每5秒刷新一次
-  
+
   // 初始化AI检测
   initAiDetection();
 });
 
-// 组件卸载时停止摄像头和定时器
+// 组件卸载时释放所有定时器和硬件资源
 onUnmounted(() => {
-  stopCamera();
   if (timer.value) {
     clearInterval(timer.value);
   }
-  if (roomRefreshTimer.value) {
-    clearInterval(roomRefreshTimer.value);
-  }
   if (aiDetectionTimer.value) {
     clearInterval(aiDetectionTimer.value);
+  }
+  if (roomPollingTimer.value) {
+    clearInterval(roomPollingTimer.value);
+  }
+
+  // 停止摄像头硬件流，释放摄像头
+  if (videoRef.value && videoRef.value.srcObject) {
+    const tracks = videoRef.value.srcObject.getTracks();
+    tracks.forEach((track) => track.stop());
   }
 });
 </script>
@@ -425,9 +443,18 @@ onUnmounted(() => {
       <h3>房间信息</h3>
       <div class="room-info">
         <p><strong>主题：</strong>{{ roomInfo.theme }}</p>
-        <p><strong>人数：</strong>{{ roomInfo.current_people }}/{{ roomInfo.max_people }}</p>
+        <p>
+          <strong>人数：</strong>{{ roomInfo.current_people }}/{{
+            roomInfo.max_people
+          }}
+        </p>
         <p><strong>状态：</strong>{{ roomInfo.status }}</p>
-        <p><strong>创建者：</strong>{{ loadingCreatorInfo ? '加载中...' : (creatorInfo?.nickname || '未知') }}</p>
+        <p>
+          <strong>创建者：</strong
+          >{{
+            loadingCreatorInfo ? "加载中..." : creatorInfo?.nickname || "未知"
+          }}
+        </p>
         <p><strong>创建时间：</strong>{{ createTimeStr }}</p>
         <p><strong>房间持续时间：</strong>{{ roomDuration }}</p>
         <p><strong>您的加入时间：</strong>{{ joinTimeStr }}</p>
@@ -435,20 +462,36 @@ onUnmounted(() => {
         <!-- 显示房间内所有用户 -->
         <p><strong>房间成员：</strong></p>
         <div class="room-users">
-          <span v-for="(userId, index) in roomInfo.users" :key="index" class="user-tag">
-            {{ loadingUserInfo ? '加载中...' : (userInfoMap.get(userId)?.nickname || userId) }}
+          <span
+            v-for="(userId, index) in roomInfo.users"
+            :key="index"
+            class="user-tag"
+          >
+            {{
+              loadingUserInfo
+                ? "加载中..."
+                : userInfoMap.get(userId)?.nickname || userId
+            }}
           </span>
         </div>
         <!-- 显示房间标签 -->
         <div v-if="roomInfo.tags && roomInfo.tags.length > 0" class="room-tags">
-          <span v-for="(tag, index) in roomInfo.tags" :key="index" class="room-tag">
+          <span
+            v-for="(tag, index) in roomInfo.tags"
+            :key="index"
+            class="room-tag"
+          >
             {{ tag }}
           </span>
         </div>
         <!-- 创建者权限按钮 -->
         <div v-if="isCreator" class="creator-actions">
-          <button class="primary" type="button" @click="openThemeDialog">修改主题</button>
-          <button class="danger" type="button" @click="openDestroyDialog">销毁房间</button>
+          <button class="primary" type="button" @click="openThemeDialog">
+            修改主题
+          </button>
+          <button class="danger" type="button" @click="openDestroyDialog">
+            销毁房间
+          </button>
         </div>
       </div>
     </div>
@@ -458,29 +501,38 @@ onUnmounted(() => {
       <h3>摄像头</h3>
       <div class="camera-controls">
         <button class="secondary" @click="toggleVideo">
-          {{ videoVisible ? '隐藏视频' : '显示视频' }}
+          {{ videoVisible ? "隐藏视频" : "显示视频" }}
         </button>
         <div class="privacy-mode-selector">
           <label>隐私模式：</label>
-          <select v-model="privacyMode" @change="changePrivacyMode(privacyMode)">
-            <option v-for="mode in privacyModes" :key="mode.value" :value="mode.value">
+          <select
+            v-model="privacyMode"
+            @change="changePrivacyMode(privacyMode)"
+          >
+            <option
+              v-for="mode in privacyModes"
+              :key="mode.value"
+              :value="mode.value"
+            >
               {{ mode.label }}
             </option>
           </select>
         </div>
       </div>
       <div class="camera-container">
-        <video 
-          ref="videoRef" 
-          class="camera-video" 
-          autoplay 
-          playsinline 
+        <video
+          ref="videoRef"
+          class="camera-video"
+          autoplay
+          playsinline
           v-if="!cameraError"
-          :style="{ display: (privacyMode === 'off' && videoVisible) ? 'block' : 'none' }"
+          :style="{
+            display: privacyMode === 'off' && videoVisible ? 'block' : 'none',
+          }"
         ></video>
-        <canvas 
-          ref="canvasRef" 
-          class="camera-canvas" 
+        <canvas
+          ref="canvasRef"
+          class="camera-canvas"
           v-if="!cameraError && videoVisible && privacyMode !== 'off'"
         ></canvas>
         <div class="camera-off" v-if="!cameraError && !videoVisible">
@@ -498,7 +550,12 @@ onUnmounted(() => {
 
     <div class="card">
       <p class="muted">当前为 MVP：只验证创建/加入/退出链路与状态机。</p>
-      <button class="danger" type="button" :disabled="leaveLoading" @click="onLeave">
+      <button
+        class="danger"
+        type="button"
+        :disabled="leaveLoading"
+        @click="onLeave"
+      >
         {{ leaveLoading ? "退出中…" : "退出房间" }}
       </button>
     </div>
@@ -522,7 +579,12 @@ onUnmounted(() => {
           <button type="button" class="secondary" @click="closeThemeDialog">
             取消
           </button>
-          <button type="button" class="primary" :disabled="updatingTheme" @click="updateTheme">
+          <button
+            type="button"
+            class="primary"
+            :disabled="updatingTheme"
+            @click="updateTheme"
+          >
             {{ updatingTheme ? "修改中..." : "修改" }}
           </button>
         </div>
@@ -540,13 +602,18 @@ onUnmounted(() => {
           <button type="button" class="secondary" @click="closeDestroyDialog">
             取消
           </button>
-          <button type="button" class="danger" :disabled="destroying" @click="destroyRoom">
+          <button
+            type="button"
+            class="danger"
+            :disabled="destroying"
+            @click="destroyRoom"
+          >
             {{ destroying ? "销毁中..." : "销毁" }}
           </button>
         </div>
       </div>
     </div>
-    
+
     <!-- 学习时长弹窗 -->
     <div v-if="showDurationDialog" class="dialog-overlay">
       <div class="dialog">

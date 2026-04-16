@@ -128,6 +128,16 @@ def profile(user: User = Depends(auth_utils.get_current_user)):
     )
 
 
+@router.get("/tags")
+def get_tags():
+    # 模拟从数据库动态获取标签系统配置
+    tags = [
+        "考研", "期末考试", "考公", "英语四级", "英语六级",
+        "托福", "雅思", "计算机二级", "教师资格证", "注册会计师",
+        "司法考试", "考研数学", "考研英语", "考研政治", "专业课"
+    ]
+    return _json_ok(tags)
+
 @router.put("/profile/nickname")
 def profile_nickname(body: NicknameBody, user: User = Depends(auth_utils.get_current_user), db: Session = Depends(get_db)):
     try:
@@ -148,6 +158,7 @@ def profile_tags(body: TagsBody, user: User = Depends(auth_utils.get_current_use
 @router.get("/info/{user_id}")
 def get_user_info(
     user_id: str,
+    user: User = Depends(auth_utils.get_current_user),
     db: Session = Depends(get_db),
 ):
     try:

@@ -14,7 +14,25 @@ const password2 = ref("");
 const agreed = ref(false);
 const loading = ref(false);
 
+function validatePhone(phone) {
+  const phoneRegex = /^[0-9]{11}$/;
+  return phoneRegex.test(phone);
+}
+
 async function onSubmit() {
+  const trimmedPhone = phone.value.trim();
+  if (!trimmedPhone) {
+    ui.showToast("请输入手机号");
+    return;
+  }
+  if (!validatePhone(trimmedPhone)) {
+    ui.showToast("手机号格式不正确，必须为11位纯数字");
+    return;
+  }
+  if (!password.value) {
+    ui.showToast("请输入密码");
+    return;
+  }
   if (!agreed.value) {
     ui.showToast("请先勾选同意协议");
     return;
@@ -25,7 +43,7 @@ async function onSubmit() {
   }
   loading.value = true;
   try {
-    const { data } = await userApi.register(phone.value.trim(), password.value);
+    const { data } = await userApi.register(trimmedPhone, password.value);
     if (data.code !== 200) {
       ui.showToast(data.msg || "注册失败");
       return;

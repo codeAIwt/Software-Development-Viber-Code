@@ -3,7 +3,7 @@ import { useRoute, useRouter } from "vue-router";
 import PrivacyMode from "../components/PrivacyMode.vue";
 import * as studyRoomApi from "../api/studyRoom";
 import { useUiStore } from "../store";
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import { startCamera, stopCamera, checkCameraPermission } from "../utils/video";
 import * as userApi from "../api/user";
 
@@ -43,6 +43,22 @@ const roomInfo = ref({
   users: []
 });
 
+// 视频流管理
+const videoStreams = ref(new Map()); // userId -> MediaStream
+const localStream = ref(null);
+const ws = ref(null);
+const peerConnections = ref(new Map()); // userId -> RTCPeerConnection
+
+// 视频网格布局
+const videoGridClass = computed(() => {
+  const count = roomInfo.value.users.length;
+  if (count === 1) return 'video-grid-1';
+  if (count === 2) return 'video-grid-2';
+  if (count === 3 || count === 4) return 'video-grid-4';
+  if (count === 5 || count === 6) return 'video-grid-6';
+  return 'video-grid-8';
+});
+
 // 用户信息映射
 const userInfoMap = ref(new Map());
 const loadingUserInfo = ref(false);
@@ -70,9 +86,6 @@ const studyDuration = ref(0);
 const aiDetectionInterval = ref(10000); // 检测间隔，单位毫秒，默认1分钟
 const aiDetectionEnabled = ref(true); // 是否启用AI检测
 const aiDetectionTimer = ref(null); // 检测定时器
-
-// 房间刷新定时器
-const roomRefreshTimer = ref(null);
 
 // 创建者信息
 const creatorInfo = ref(null);
@@ -171,7 +184,8 @@ async function initCamera() {
       throw new Error('浏览器不支持摄像头功能');
     }
     
-    await startCamera(videoRef.value);
+    const stream = await startCamera(videoRef.value);
+    localStream.value = stream;
     // 启动隐私模式处理
     applyPrivacyMode();
   } catch (error) {
@@ -184,6 +198,189 @@ async function initCamera() {
   } finally {
     cameraLoading.value = false;
   }
+}
+
+// 初始化WebSocket连接
+function initWebSocket() {
+  const roomId = route.params.id;
+  const userId = localStorage.getItem('user_id');
+  
+  // 使用与后端WebSocket服务相同的协议和主机
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${wsProtocol}//${window.location.host}/ws/room/${roomId}?user_id=${userId}`;
+  
+  ws.value = new WebSocket(wsUrl);
+  
+  ws.value.onopen = () => {
+    console.log('WebSocket connected');
+    // 发送加入房间消息
+    ws.value.send(JSON.stringify({
+      type: 'join',
+      user_id: userId,
+      room_id: roomId
+    }));
+  };
+  
+  ws.value.onmessage = async (event) => {
+    const message = JSON.parse(event.data);
+    await handleWebSocketMessage(message);
+  };
+  
+  ws.value.onclose = () => {
+    console.log('WebSocket disconnected');
+    // 清理资源
+    cleanupPeerConnections();
+  };
+  
+  ws.value.onerror = (error) => {
+    console.error('WebSocket error:', error);
+  };
+}
+
+// 处理WebSocket消息
+async function handleWebSocketMessage(message) {
+  const { type, user_id, data } = message;
+  
+  switch (type) {
+    case 'user_join':
+      await handleUserJoin(user_id);
+      break;
+    case 'user_leave':
+      handleUserLeave(user_id);
+      break;
+    case 'offer':
+      await handleOffer(user_id, data);
+      break;
+    case 'answer':
+      await handleAnswer(user_id, data);
+      break;
+    case 'ice_candidate':
+      await handleIceCandidate(user_id, data);
+      break;
+    default:
+      console.log('Unknown message type:', type);
+  }
+}
+
+// 处理用户加入
+async function handleUserJoin(userId) {
+  // 创建PeerConnection
+  const pc = createPeerConnection(userId);
+  
+  // 添加本地流
+  if (localStream.value) {
+    localStream.value.getTracks().forEach(track => {
+      pc.addTrack(track, localStream.value);
+    });
+  }
+  
+  // 创建offer
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  
+  // 发送offer
+  ws.value.send(JSON.stringify({
+    type: 'offer',
+    target_user_id: userId,
+    data: offer
+  }));
+}
+
+// 处理用户离开
+function handleUserLeave(userId) {
+  // 清理PeerConnection
+  const pc = peerConnections.value.get(userId);
+  if (pc) {
+    pc.close();
+    peerConnections.value.delete(userId);
+  }
+  
+  // 移除视频流
+  videoStreams.value.delete(userId);
+}
+
+// 处理offer
+async function handleOffer(userId, offer) {
+  // 创建PeerConnection
+  const pc = createPeerConnection(userId);
+  
+  // 添加本地流
+  if (localStream.value) {
+    localStream.value.getTracks().forEach(track => {
+      pc.addTrack(track, localStream.value);
+    });
+  }
+  
+  // 设置远程描述
+  await pc.setRemoteDescription(new RTCSessionDescription(offer));
+  
+  // 创建answer
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  
+  // 发送answer
+  ws.value.send(JSON.stringify({
+    type: 'answer',
+    target_user_id: userId,
+    data: answer
+  }));
+}
+
+// 处理answer
+async function handleAnswer(userId, answer) {
+  const pc = peerConnections.value.get(userId);
+  if (pc) {
+    await pc.setRemoteDescription(new RTCSessionDescription(answer));
+  }
+}
+
+// 处理ICE候选
+async function handleIceCandidate(userId, candidate) {
+  const pc = peerConnections.value.get(userId);
+  if (pc) {
+    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+  }
+}
+
+// 创建PeerConnection
+function createPeerConnection(userId) {
+  const pc = new RTCPeerConnection({
+    iceServers: [
+      {
+        urls: ['stun:stun.l.google.com:19302']
+      }
+    ]
+  });
+  
+  // 处理ICE候选
+  pc.onicecandidate = (event) => {
+    if (event.candidate) {
+      ws.value.send(JSON.stringify({
+        type: 'ice_candidate',
+        target_user_id: userId,
+        data: event.candidate
+      }));
+    }
+  };
+  
+  // 处理远程流
+  pc.ontrack = (event) => {
+    videoStreams.value.set(userId, event.streams[0]);
+  };
+  
+  // 存储PeerConnection
+  peerConnections.value.set(userId, pc);
+  
+  return pc;
+}
+
+// 清理PeerConnections
+function cleanupPeerConnections() {
+  peerConnections.value.forEach(pc => {
+    pc.close();
+  });
+  peerConnections.value.clear();
+  videoStreams.value.clear();
 }
 
 // 应用隐私模式
@@ -381,7 +578,8 @@ async function fetchCurrentUserInfo() {
 onMounted(async () => {
   await fetchCurrentUserInfo();
   await fetchRoomInfo();
-  initCamera();
+  await initCamera();
+  initWebSocket();
   
   // 启动定时器
   timer.value = setInterval(() => {
@@ -389,7 +587,7 @@ onMounted(async () => {
   }, 1000);
   
   // 定期刷新房间信息，以获取最新的用户列表
-  roomRefreshTimer.value = setInterval(async () => {
+  setInterval(async () => {
     await fetchRoomInfo();
   }, 5000); // 每5秒刷新一次
   
@@ -397,25 +595,31 @@ onMounted(async () => {
   initAiDetection();
 });
 
-// 组件卸载时停止摄像头和定时器
+// 组件卸载时清理资源
 onUnmounted(() => {
-  stopCamera();
   if (timer.value) {
     clearInterval(timer.value);
-  }
-  if (roomRefreshTimer.value) {
-    clearInterval(roomRefreshTimer.value);
   }
   if (aiDetectionTimer.value) {
     clearInterval(aiDetectionTimer.value);
   }
+  
+  // 关闭WebSocket连接
+  if (ws.value) {
+    ws.value.close();
+  }
+  
+  // 清理PeerConnections
+  cleanupPeerConnections();
+  
+  // 停止摄像头
+  stopCamera();
 });
 </script>
 
 <template>
   <div class="wrap">
     <header class="bar">
-      <router-link to="/study-room">返回列表</router-link>
       <h2>房间 {{ route.params.id }}</h2>
     </header>
     <PrivacyMode label="隐私模式与伴学能力在后续迭代接入。" />
@@ -469,30 +673,55 @@ onUnmounted(() => {
           </select>
         </div>
       </div>
-      <div class="camera-container">
-        <video 
-          ref="videoRef" 
-          class="camera-video" 
-          autoplay 
-          playsinline 
-          v-if="!cameraError"
-          :style="{ display: (privacyMode === 'off' && videoVisible) ? 'block' : 'none' }"
-        ></video>
-        <canvas 
-          ref="canvasRef" 
-          class="camera-canvas" 
-          v-if="!cameraError && videoVisible && privacyMode !== 'off'"
-        ></canvas>
-        <div class="camera-off" v-if="!cameraError && !videoVisible">
-          <p>视频已隐藏（摄像头仍在运行）</p>
+      
+      <!-- 多人视频网格 -->
+      <div class="video-grid" :class="videoGridClass" v-if="videoVisible">
+        <!-- 本地视频 -->
+        <div class="video-item" v-if="!cameraError">
+          <div class="video-header">
+            <span>我</span>
+          </div>
+          <video 
+            ref="videoRef" 
+            class="camera-video" 
+            autoplay 
+            playsinline 
+            :style="{ display: privacyMode === 'off' ? 'block' : 'none' }"
+          ></video>
+          <canvas 
+            ref="canvasRef" 
+            class="camera-canvas" 
+            v-if="privacyMode !== 'off'"
+          ></canvas>
+          <div class="camera-loading" v-if="cameraLoading">
+            <p>正在启动摄像头...</p>
+          </div>
         </div>
-        <div class="camera-error" v-else-if="cameraError">
-          <p>无法访问摄像头</p>
-          <button class="primary" @click="initCamera">重试</button>
+        
+        <!-- 远程视频 -->
+        <div 
+          v-for="(stream, userId) in videoStreams" 
+          :key="userId" 
+          class="video-item"
+        >
+          <div class="video-header">
+            <span>{{ userInfoMap.get(userId)?.nickname || userId }}</span>
+          </div>
+          <video 
+            :ref="el => { if (el) el.srcObject = stream }" 
+            class="remote-video" 
+            autoplay 
+            playsinline 
+          ></video>
         </div>
-        <div class="camera-loading" v-if="cameraLoading">
-          <p>正在启动摄像头...</p>
-        </div>
+      </div>
+      
+      <div class="camera-off" v-if="!cameraError && !videoVisible">
+        <p>视频已隐藏（摄像头仍在运行）</p>
+      </div>
+      <div class="camera-error" v-else-if="cameraError">
+        <p>无法访问摄像头</p>
+        <button class="primary" @click="initCamera">重试</button>
       </div>
     </div>
 
@@ -792,6 +1021,67 @@ h3 {
   align-items: center;
   justify-content: center;
 }
+
+/* 视频网格布局 */
+.video-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  width: 100%;
+  min-height: 300px;
+}
+
+.video-grid-1 {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+
+.video-grid-2 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+}
+
+.video-grid-4 {
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+}
+
+.video-grid-6 {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+}
+
+.video-grid-8 {
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+}
+
+.video-item {
+  position: relative;
+  border: 1px solid #e6eaf2;
+  border-radius: 10px;
+  overflow: hidden;
+  background-color: #f9fafb;
+  display: flex;
+  flex-direction: column;
+}
+
+.video-header {
+  background-color: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 1;
+}
+
+.camera-video, .remote-video, .camera-canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  flex: 1;
+}
+
 .danger {
   width: 100%;
   border: 1px solid #ef4444;

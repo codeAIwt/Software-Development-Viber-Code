@@ -13,10 +13,28 @@ const phone = ref("");
 const password = ref("");
 const loading = ref(false);
 
+function validatePhone(phone) {
+  const phoneRegex = /^[0-9]{11}$/;
+  return phoneRegex.test(phone);
+}
+
 async function onSubmit() {
+  const trimmedPhone = phone.value.trim();
+  if (!trimmedPhone) {
+    ui.showToast("请输入手机号");
+    return;
+  }
+  if (!validatePhone(trimmedPhone)) {
+    ui.showToast("手机号格式不正确，请重新输入");
+    return;
+  }
+  if (!password.value) {
+    ui.showToast("请输入密码");
+    return;
+  }
   loading.value = true;
   try {
-    const { data } = await userApi.login(phone.value.trim(), password.value);
+    const { data } = await userApi.login(trimmedPhone, password.value);
     if (data.code !== 200) {
       ui.showToast(data.msg || "登录失败");
       return;

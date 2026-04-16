@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from uuid import uuid4
+import re
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -15,6 +16,12 @@ class UserServiceError(Exception):
         self.msg = msg
 
 
+def _validate_phone(phone: str) -> bool:
+    if not phone:
+        return False
+    return bool(re.match(r'^[0-9]{11}$', phone))
+
+
 def _default_nickname(phone: str) -> str:
     tail = phone[-4:] if len(phone) >= 4 else phone
     return f"用户{tail}"
@@ -23,6 +30,8 @@ def _default_nickname(phone: str) -> str:
 def register_user(db: Session, phone: str, password: str) -> User:
     if not phone or not password:
         raise UserServiceError(400, "phone 与 password 不能为空")
+    if not _validate_phone(phone):
+        raise UserServiceError(400, "手机号格式不正确，必须为11位纯数字")
     uid = uuid4().hex
     now = datetime.now(timezone.utc)
     user = User(
@@ -49,6 +58,8 @@ def register_user(db: Session, phone: str, password: str) -> User:
 def login_user(db: Session, phone: str, password: str) -> User:
     if not phone or not password:
         raise UserServiceError(400, "phone 与 password 不能为空")
+    if not _validate_phone(phone):
+        raise UserServiceError(400, "手机号格式不正确，必须为11位纯数字")
     user = db.scalar(select(User).where(User.phone == phone))
     if not user or user.password != password:
         raise UserServiceError(400, "手机号或密码错误")

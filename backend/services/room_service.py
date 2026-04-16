@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from models.study_room import StudyRoom
 from models.room_user import RoomUser
+from models.study_duration import StudyDuration
 from utils import cache
 
 MatchType = Literal["manual", "auto"]
@@ -466,6 +467,9 @@ def leave_room(db: Session, user_id: str, room_id: str) -> dict:
         if join_time_str:
             join_time = int(join_time_str)
             study_duration = now_ms - join_time
+        
+        # 转换为分钟
+        study_duration_minutes = study_duration // 60000
 
         pipe = r.pipeline()
         pipe.srem(active_key, user_id)
@@ -503,9 +507,41 @@ def leave_room(db: Session, user_id: str, room_id: str) -> dict:
             pipe.zadd(idle_zset_key, {room_id: now_ms})
         pipe.execute()
         
+        # 记录学习时长到数据库
+        if study_duration_minutes > 0:
+            # 获取当前日期
+            beijing_timezone = timezone(timedelta(hours=8))
+            today = datetime.now(beijing_timezone).date()
+            
+            # 查找是否已有当日记录
+            existing_record = db.query(StudyDuration).filter(
+                StudyDuration.user_id == user_id,
+                StudyDuration.study_date == today
+            ).first()
+            
+            if existing_record:
+                # 更新现有记录
+                existing_record.total_minutes += study_duration_minutes
+                # 截断到1440分钟（24小时）
+                if existing_record.total_minutes > 1440:
+                    existing_record.total_minutes = 1440
+            else:
+                # 创建新记录
+                new_record = StudyDuration(
+                    user_id=user_id,
+                    study_date=today,
+                    total_minutes=study_duration_minutes,
+                    beat_percent=None,
+                    create_time=datetime.now(beijing_timezone)
+                )
+                db.add(new_record)
+            
+            # 提交事务
+            db.commit()
+        
         # 打印用户离开时间和学习时长
         print(f"用户 {user_id} 离开房间 {room_id}，离开时间: {now_ms}")
-        print(f"用户 {user_id} 在房间 {room_id} 中的学习时长: {study_duration // 60000} 分钟")
+        print(f"用户 {user_id} 在房间 {room_id} 中的学习时长: {study_duration_minutes} 分钟")
         
         # 如果房间关闭，打印关闭信息
         if new_status == "closed":
@@ -513,7 +549,7 @@ def leave_room(db: Session, user_id: str, room_id: str) -> dict:
 
         return {
             "room_id": room_id,
-            "study_duration": study_duration // 60000  # 转换为分钟
+            "study_duration": study_duration_minutes  # 转换为分钟
         }
     finally:
         cache.release_room_leave_lock(room_id)

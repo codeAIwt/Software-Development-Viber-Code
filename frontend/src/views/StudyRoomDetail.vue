@@ -15,6 +15,21 @@ const leaveLoading = ref(false);
 const cameraError = ref(false);
 const cameraLoading = ref(true);
 const videoRef = ref(null);
+const canvasRef = ref(null);
+
+// 摄像头状态
+const cameraOn = ref(true);
+
+// 隐私模式
+const privacyMode = ref('blur'); // blur 或 hand 或 off
+const privacyModes = [
+  { value: 'blur', label: '模糊模式' },
+  { value: 'hand', label: '手部遮挡模式' },
+  { value: 'off', label: '关闭隐私模式' }
+];
+
+// 视频显示状态
+const videoVisible = ref(true);
 
 // 房间信息
 const roomInfo = ref({
@@ -46,6 +61,15 @@ const updatingTheme = ref(false);
 // 销毁房间相关
 const showDestroyDialog = ref(false);
 const destroying = ref(false);
+
+// 学习时长弹窗
+const showDurationDialog = ref(false);
+const studyDuration = ref(0);
+
+// AI检测配置
+const aiDetectionInterval = ref(10000); // 检测间隔，单位毫秒，默认1分钟
+const aiDetectionEnabled = ref(true); // 是否启用AI检测
+const aiDetectionTimer = ref(null); // 检测定时器
 
 // 创建者信息
 const creatorInfo = ref(null);
@@ -145,6 +169,8 @@ async function initCamera() {
     }
     
     await startCamera(videoRef.value);
+    // 启动隐私模式处理
+    applyPrivacyMode();
   } catch (error) {
     cameraError.value = true;
     if (error.message === '浏览器不支持摄像头功能') {
@@ -155,6 +181,91 @@ async function initCamera() {
   } finally {
     cameraLoading.value = false;
   }
+}
+
+// 应用隐私模式
+function applyPrivacyMode() {
+  if (!videoRef.value || !canvasRef.value) return;
+  
+  const video = videoRef.value;
+  const canvas = canvasRef.value;
+  const ctx = canvas.getContext('2d');
+  
+  // 设置canvas尺寸
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  
+  function draw() {
+    if (!cameraOn.value) return;
+    
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    
+    if (privacyMode.value === 'blur') {
+      // 模糊模式
+      ctx.filter = 'blur(10px)';
+      ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height);
+      ctx.filter = 'none';
+    } else if (privacyMode.value === 'hand') {
+      // 手部遮挡模式（简化实现，在画面中上方添加黑色长矩形遮挡）
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, 0, canvas.width, canvas.height * 0.6); // 上方60%区域
+    }
+    // off模式不做处理，直接显示原始画面
+    
+    requestAnimationFrame(draw);
+  }
+  
+  draw();
+}
+
+// 切换视频显示状态
+function toggleVideo() {
+  videoVisible.value = !videoVisible.value;
+}
+
+// 初始化AI检测
+function initAiDetection() {
+  if (aiDetectionEnabled.value) {
+    aiDetectionTimer.value = setInterval(async () => {
+      await captureAndDetect();
+    }, aiDetectionInterval.value);
+  }
+}
+
+// 截图并检测
+async function captureAndDetect() {
+  if (!videoRef.value || !cameraOn.value) return;
+  
+  try {
+    // 创建临时Canvas用于截图
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = videoRef.value.videoWidth || 640;
+    tempCanvas.height = videoRef.value.videoHeight || 480;
+    const tempCtx = tempCanvas.getContext('2d');
+    
+    // 绘制当前视频帧
+    tempCtx.drawImage(videoRef.value, 0, 0, tempCanvas.width, tempCanvas.height);
+    
+    // 转换为Base64
+    const base64Image = tempCanvas.toDataURL('image/jpeg');
+    
+    // 发送到后端进行检测
+    const { data } = await studyRoomApi.detectPerson(base64Image, route.params.id, localStorage.getItem('user_id'));
+    if (data.code === 200) {
+      if (!data.data.has_person) {
+        // 检测到无人，自动退出房间
+        await onLeave();
+      }
+    }
+  } catch (error) {
+    console.error('AI检测失败:', error);
+  }
+}
+
+// 切换隐私模式
+function changePrivacyMode(mode) {
+  privacyMode.value = mode;
+  applyPrivacyMode();
 }
 
 async function onLeave() {
@@ -169,7 +280,15 @@ async function onLeave() {
       ui.showToast(data.msg || "退出失败");
       return;
     }
-    router.push("/study-room");
+    
+    // 显示学习时长弹窗
+    studyDuration.value = data.data.study_duration;
+    showDurationDialog.value = true;
+    
+    // 3秒后跳转到房间列表
+    setTimeout(() => {
+      router.push("/study-room");
+    }, 3000);
   } catch (e) {
     ui.showToast(e.response?.data?.msg || e.message || "退出失败");
   } finally {
@@ -270,13 +389,18 @@ onMounted(async () => {
   setInterval(async () => {
     await fetchRoomInfo();
   }, 5000); // 每5秒刷新一次
+  
+  // 初始化AI检测
+  initAiDetection();
 });
 
-// 组件卸载时停止摄像头和定时器
+// 组件卸载时只停止定时器，不停止摄像头（为后续AI检测做准备）
 onUnmounted(() => {
-  stopCamera();
   if (timer.value) {
     clearInterval(timer.value);
+  }
+  if (aiDetectionTimer.value) {
+    clearInterval(aiDetectionTimer.value);
   }
 });
 </script>
@@ -325,6 +449,19 @@ onUnmounted(() => {
     <!-- 摄像头显示区域 -->
     <div class="card">
       <h3>摄像头</h3>
+      <div class="camera-controls">
+        <button class="secondary" @click="toggleVideo">
+          {{ videoVisible ? '隐藏视频' : '显示视频' }}
+        </button>
+        <div class="privacy-mode-selector">
+          <label>隐私模式：</label>
+          <select v-model="privacyMode" @change="changePrivacyMode(privacyMode)">
+            <option v-for="mode in privacyModes" :key="mode.value" :value="mode.value">
+              {{ mode.label }}
+            </option>
+          </select>
+        </div>
+      </div>
       <div class="camera-container">
         <video 
           ref="videoRef" 
@@ -332,8 +469,17 @@ onUnmounted(() => {
           autoplay 
           playsinline 
           v-if="!cameraError"
+          :style="{ display: (privacyMode === 'off' && videoVisible) ? 'block' : 'none' }"
         ></video>
-        <div class="camera-error" v-else>
+        <canvas 
+          ref="canvasRef" 
+          class="camera-canvas" 
+          v-if="!cameraError && videoVisible && privacyMode !== 'off'"
+        ></canvas>
+        <div class="camera-off" v-if="!cameraError && !videoVisible">
+          <p>视频已隐藏（摄像头仍在运行）</p>
+        </div>
+        <div class="camera-error" v-else-if="cameraError">
           <p>无法访问摄像头</p>
           <button class="primary" @click="initCamera">重试</button>
         </div>
@@ -390,6 +536,18 @@ onUnmounted(() => {
           <button type="button" class="danger" :disabled="destroying" @click="destroyRoom">
             {{ destroying ? "销毁中..." : "销毁" }}
           </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 学习时长弹窗 -->
+    <div v-if="showDurationDialog" class="dialog-overlay">
+      <div class="dialog">
+        <h3>学习时长</h3>
+        <div class="dialog-content">
+          <p>您在自习室中的学习时长为：</p>
+          <p class="duration-value">{{ studyDuration }} 分钟</p>
+          <p class="muted">3秒后自动返回房间列表</p>
         </div>
       </div>
     </div>
@@ -580,6 +738,35 @@ h3 {
   height: 100%;
   object-fit: cover;
 }
+.camera-canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.camera-off {
+  text-align: center;
+  color: #6b7280;
+}
+.camera-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.privacy-mode-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.privacy-mode-selector select {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #d7dbe4;
+  background: #f9fafb;
+  font-size: 14px;
+}
 .camera-error {
   text-align: center;
   color: #ef4444;
@@ -627,5 +814,13 @@ p {
 .muted {
   color: #6b7280;
   font-size: 13px;
+}
+
+.duration-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #3b82f6;
+  text-align: center;
+  margin: 16px 0;
 }
 </style>

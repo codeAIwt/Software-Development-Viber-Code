@@ -83,3 +83,14 @@ export function updateRoom(roomId, theme) {
 export function destroyRoom(roomId) {
   return client.delete(`/room/destroy/${roomId}`);
 }
+
+/**
+ * POST /api/room/detect-person — 检测摄像头前是否有人
+ */
+export function detectPerson(image, roomId, userId) {
+  return client.post("/room/detect-person", {
+    image,
+    room_id: roomId,
+    user_id: userId
+  });
+}

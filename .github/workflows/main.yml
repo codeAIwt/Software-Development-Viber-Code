@@ -90,31 +90,31 @@ jobs:
     
     - name: Run database initialization test (TC-001)
       run: |
-      cd backend
-      python - <<'PY'
-      from config.db import init_db, engine
-      from sqlalchemy import text
-      import sys
+        cd backend
+        python - <<'PY'
+        from config.db import init_db, engine
+        from sqlalchemy import text
+        import sys
 
-      try:
-        # Test database connection
-        with engine.connect() as conn:
-          result = conn.execute(text('SELECT 1'))
-          print('✅ Database connection test passed')
+        try:
+            # Test database connection
+            with engine.connect() as conn:
+                result = conn.execute(text('SELECT 1'))
+                print('✅ Database connection test passed')
 
-        # Test table creation
-        init_db()
-        print('✅ Database initialization test passed')
+            # Test table creation
+            init_db()
+            print('✅ Database initialization test passed')
 
-        # Test table structure
-        with engine.connect() as conn:
-          tables = conn.execute(text('SHOW TABLES')).fetchall()
-          print(f'✅ Found {len(tables)} tables')
+            # Test table structure
+            with engine.connect() as conn:
+                tables = conn.execute(text('SHOW TABLES')).fetchall()
+                print(f'✅ Found {len(tables)} tables')
 
-      except Exception as e:
-        print(f'❌ Database test failed: {e}')
-        sys.exit(1)
-      PY
+        except Exception as e:
+            print(f'❌ Database test failed: {e}')
+            sys.exit(1)
+        PY
     
     - name: Run model validation test (TC-002)
       run: |

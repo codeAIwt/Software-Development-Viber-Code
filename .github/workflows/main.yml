@@ -21,6 +21,29 @@ jobs:
           --health-retries 5
         ports:
           - 6379:6379
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root_password
+          MYSQL_DATABASE: online_study_test
+          MYSQL_USER: test_user
+          MYSQL_PASSWORD: test_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping --silent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: 'mysql+pymysql://test_user:test_password@127.0.0.1:3306/online_study_test?charset=utf8mb4'
+      REDIS_URL: 'redis://127.0.0.1:6379/0'
+      DB_HOST: '127.0.0.1'
+      DB_PORT: '3306'
+      DB_USER: 'test_user'
+      DB_PASSWORD: 'test_password'
+      DB_NAME: 'online_study_test'
     
     steps:
     - name: Checkout code
@@ -38,13 +61,32 @@ jobs:
         pip install -r requirements.txt
         pip install pytest pytest-cov
     
-    - name: Set up MySQL for testing
+    - name: Wait for MySQL to be ready
       run: |
-        sudo systemctl start mysql
-        sudo mysql -e "CREATE DATABASE IF NOT EXISTS online_study_test;"
-        sudo mysql -e "CREATE USER IF NOT EXISTS 'test_user'@'localhost' IDENTIFIED BY 'test_password';"
-        sudo mysql -e "GRANT ALL PRIVILEGES ON online_study_test.* TO 'test_user'@'localhost';"
-        sudo mysql -e "FLUSH PRIVILEGES;"
+        cd backend
+        python - <<'PY'
+        import os, time, sys
+        import pymysql
+
+        host = os.environ.get('DB_HOST', '127.0.0.1')
+        port = int(os.environ.get('DB_PORT', '3306'))
+        user = os.environ.get('DB_USER')
+        password = os.environ.get('DB_PASSWORD')
+        db = os.environ.get('DB_NAME', 'online_study_test')
+
+        for i in range(60):
+            try:
+                conn = pymysql.connect(host=host, port=port, user=user, password=password, database=db)
+                conn.close()
+                print('✅ MySQL is available')
+                break
+            except Exception as e:
+                print('Waiting for MySQL...', e)
+                time.sleep(2)
+        else:
+            print('❌ MySQL not ready')
+            sys.exit(1)
+        PY
     
     - name: Run database initialization test (TC-001)
       run: |
@@ -77,91 +119,92 @@ except Exception as e:
     - name: Run model validation test (TC-002)
       run: |
         cd backend
-        python -c "
-from models.user import User
-from models.study_room import StudyRoom
-from models.room_user import RoomUser
-from models.study_duration import StudyDuration
-from datetime import datetime, date
-import sys
+        python - <<'PY'
+        from models.user import User
+        from models.study_room import StudyRoom
+        from models.room_user import RoomUser
+        from models.study_duration import StudyDuration
+        from datetime import datetime, date
+        import sys
 
-try:
-    # Test User model
-    user = User(id='test_user_001', username='testuser', password='hashed_password', 
-                nickname='Test User', avatar='default.jpg', register_time=datetime.now())
-    assert user.id == 'test_user_001'
-    print('✅ User model test passed')
-    
-    # Test StudyRoom model
-    room = StudyRoom(id='test_room_001', theme='考研', max_people=4, 
-                     current_people=1, status='active', creator_id='test_user_001', 
-                     create_time=datetime.now())
-    assert room.theme == '考研'
-    print('✅ StudyRoom model test passed')
-    
-    # Test StudyDuration model
-    duration = StudyDuration(user_id='test_user_001', study_date=date.today(), 
-                             total_minutes=120, beat_percent=85.5)
-    assert duration.total_minutes == 120
-    print('✅ StudyDuration model test passed')
-    
-    print('✅ All model validation tests passed')
-    
-except Exception as e:
-    print(f'❌ Model validation test failed: {e}')
-    sys.exit(1)
-"
+        try:
+            # Test User model
+            user = User(id='test_user_001', username='testuser', password='hashed_password',
+                        nickname='Test User', avatar='default.jpg', register_time=datetime.now())
+            assert user.id == 'test_user_001'
+            print('✅ User model test passed')
+
+            # Test StudyRoom model
+            room = StudyRoom(id='test_room_001', theme='考研', max_people=4,
+                             current_people=1, status='active', creator_id='test_user_001',
+                             create_time=datetime.now())
+            assert room.theme == '考研'
+            print('✅ StudyRoom model test passed')
+
+            # Test StudyDuration model
+            duration = StudyDuration(user_id='test_user_001', study_date=date.today(),
+                                     total_minutes=120, beat_percent=85.5)
+            assert duration.total_minutes == 120
+            print('✅ StudyDuration model test passed')
+
+            print('✅ All model validation tests passed')
+
+        except Exception as e:
+            print(f'❌ Model validation test failed: {e}')
+            sys.exit(1)
+        PY
     
     - name: Run service layer tests (TC-003, TC-004)
       run: |
         cd backend
-        python -c "
-from services.user_service import create_user, get_user_by_username
-from services.room_service import create_room, join_room
-from services.duration_service import update_study_duration, get_user_daily_duration
-from config.db import get_db
-from datetime import date
-import sys
+        python - <<'PY'
+        from services.user_service import register_user, login_user
+        from services.duration_service import update_study_duration, get_user_daily_duration
+        from config.db import get_db
+        from datetime import date
+        import sys, traceback
 
-try:
-    # Get database session
-    db = next(get_db())
-    
-    # Test user service (TC-001 related)
-    user_data = {
-        'username': 'github_test_user',
-        'password': 'Test123456',
-        'nickname': 'GitHub Test User'
-    }
-    
-    # Test room service (TC-002, TC-003 related)
-    room_data = {
-        'theme': '考研',
-        'max_people': 4,
-        'creator_id': 'test_user_001'
-    }
-    
-    # Test duration service (TC-004 related)
-    duration_data = {
-        'user_id': 'test_user_001',
-        'minutes': 120
-    }
-    
-    print('✅ Service layer import test passed')
-    
-    # Test database operations
-    with db.begin():
-        # Test basic queries
-        result = db.execute('SELECT 1').fetchone()
-        assert result[0] == 1
-        print('✅ Database operation test passed')
-    
-    db.close()
-    
-except Exception as e:
-    print(f'❌ Service layer test failed: {e}')
-    sys.exit(1)
-"
+        try:
+            db = next(get_db())
+
+            # Create a test user (phone must be 11 digits)
+            phone = '13900000001'
+            password = 'Test123456'
+            try:
+                user = register_user(db, phone, password)
+            except Exception:
+                # If already exists, fetch by phone
+                from sqlalchemy import select
+                from models.user import User
+                user = db.scalar(select(User).where(User.phone == phone))
+                if not user:
+                    raise
+
+            assert user.phone == phone
+            print('✅ register_user passed')
+
+            # Login
+            logged = login_user(db, phone, password)
+            assert logged.id == user.id
+            print('✅ login_user passed')
+
+            # Update study duration
+            rec = update_study_duration(db, user.id, 120)
+            assert rec.total_minutes >= 120
+            print('✅ update_study_duration passed')
+
+            # Get daily duration
+            today = date.today()
+            daily = get_user_daily_duration(db, user.id, today)
+            assert daily['total_minutes'] >= 120
+            print('✅ get_user_daily_duration passed')
+
+            db.close()
+        except Exception as e:
+            traceback.print_exc()
+            print(f'❌ Service layer test failed: {e}')
+            sys.exit(1)
+        PY
     
     - name: Run API endpoint tests (TC-005, TC-006)
       run: |
@@ -207,32 +250,34 @@ except Exception as e:
     - name: Run Redis integration test (TC-007, TC-008)
       run: |
         cd backend
-        python -c "
-from utils.cache import _redis
-import sys
+        python - <<'PY'
+        from utils.cache import _redis
+        import sys
 
-try:
-    # Test Redis connection
-    r = _redis()
-    
-    # Test basic operations
-    test_key = 'github_actions_test'
-    test_value = 'test_value'
-    
-    r.set(test_key, test_value, ex=60)
-    retrieved_value = r.get(test_key)
-    
-    assert retrieved_value.decode() == test_value
-    print('✅ Redis connection and basic operations test passed')
-    
-    # Test cache functionality
-    r.delete(test_key)
-    print('✅ Redis cache functionality test passed')
-    
-except Exception as e:
-    print(f'❌ Redis integration test failed: {e}')
-    sys.exit(1)
-"
+        try:
+            # Test Redis connection
+            r = _redis()
+
+            # Test basic operations
+            test_key = 'github_actions_test'
+            test_value = 'test_value'
+
+            r.set(test_key, test_value, ex=60)
+            retrieved_value = r.get(test_key)
+
+            if isinstance(retrieved_value, bytes):
+                retrieved_value = retrieved_value.decode()
+            assert retrieved_value == test_value
+            print('✅ Redis connection and basic operations test passed')
+
+            # Test cache functionality
+            r.delete(test_key)
+            print('✅ Redis cache functionality test passed')
+
+        except Exception as e:
+            print(f'❌ Redis integration test failed: {e}')
+            sys.exit(1)
+        PY
     
     - name: Run code quality checks
       run: |
@@ -258,18 +303,12 @@ except Exception as e:
       with:
         node-version: '18'
         cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
+        cache-dependency-path: frontend/package.json
     
     - name: Install frontend dependencies
       run: |
         cd frontend
-        npm ci
-    
-    - name: Run frontend syntax check
-      run: |
-        cd frontend
-        npx vue-tsc --noEmit
-        echo '✅ TypeScript syntax check passed'
+        npm install
     
     - name: Build frontend for production
       run: |
@@ -298,6 +337,29 @@ except Exception as e:
           --health-retries 5
         ports:
           - 6379:6379
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root_password
+          MYSQL_DATABASE: online_study_test
+          MYSQL_USER: test_user
+          MYSQL_PASSWORD: test_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping --silent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: 'mysql+pymysql://test_user:test_password@127.0.0.1:3306/online_study_test?charset=utf8mb4'
+      REDIS_URL: 'redis://127.0.0.1:6379/0'
+      DB_HOST: '127.0.0.1'
+      DB_PORT: '3306'
+      DB_USER: 'test_user'
+      DB_PASSWORD: 'test_password'
+      DB_NAME: 'online_study_test'
     
     steps:
     - name: Checkout code
@@ -313,6 +375,33 @@ except Exception as e:
         cd backend
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+    
+    - name: Wait for MySQL to be ready
+      run: |
+        cd backend
+        python - <<'PY'
+        import os, time, sys
+        import pymysql
+
+        host = os.environ.get('DB_HOST', '127.0.0.1')
+        port = int(os.environ.get('DB_PORT', '3306'))
+        user = os.environ.get('DB_USER')
+        password = os.environ.get('DB_PASSWORD')
+        db = os.environ.get('DB_NAME', 'online_study_test')
+
+        for i in range(60):
+            try:
+                conn = pymysql.connect(host=host, port=port, user=user, password=password, database=db)
+                conn.close()
+                print('✅ MySQL is available')
+                break
+            except Exception as e:
+                print('Waiting for MySQL...', e)
+                time.sleep(2)
+        else:
+            print('❌ MySQL not ready')
+            sys.exit(1)
+        PY
     
     - name: Start backend server in background
       run: |

@@ -89,14 +89,13 @@ utf8mb4（支持表情符号，兼容昵称/头像）
 | 字段            | 类型           | 约束              | 默认值   | 说明           |
 | ------------- | ------------ | --------------- | ----- | ------------ |
 | id            | char(32)     | PRIMARY KEY     | —     | 用户唯一ID（UUID） |
-| phone         | varchar(11)  | NOT NULL UNIQUE | —     | 注册手机号（登录账号）  |
+| username      | varchar(50)  | NOT NULL UNIQUE | —     | 用户名（登录账号）    |
 | password      | varchar(64)  | NOT NULL        | —     | BCrypt 加密密码  |
 | nickname      | varchar(20)  | NOT NULL        | —     | 用户昵称         |
 | avatar        | varchar(255) | NOT NULL        | 默认URL | 头像地址         |
-| registertime  | datetime     | NOT NULL        | —     | 注册时间         |
-| lastlogintime | datetime     | NULL            | NULL  | 最后登录时间       |
+| register_time | datetime     | NOT NULL        | —     | 注册时间         |
+| last_login_time | datetime     | NULL            | NULL  | 最后登录时间       |
 | tags          | varchar(255) | NULL            | —     | 学习标签，逗号分隔     |
-| is_first_login | tinyint(1)   | NOT NULL        | 1     | 是否首次登录，1=是 0=否 |
 
 
 **索引**

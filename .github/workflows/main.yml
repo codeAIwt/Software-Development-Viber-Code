@@ -453,7 +453,7 @@ jobs:
         echo '✅ Security scan completed'
     
     - name: Upload security report
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: security-report
         path: backend/security_report.json
@@ -497,7 +497,7 @@ jobs:
         cat test-summary.md
     
     - name: Upload test summary
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: test-summary
         path: test-summary.md

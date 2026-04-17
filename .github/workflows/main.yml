@@ -129,8 +129,8 @@ jobs:
 
         try:
             # Test User model
-            user = User(id='test_user_001', username='testuser', password='hashed_password',
-                        nickname='Test User', avatar='default.jpg', register_time=datetime.now())
+            user = User(id='test_user_001', phone='13900000001', password='hashed_password',
+                        nickname='Test User', avatar='default.jpg', registertime=datetime.now())
             assert user.id == 'test_user_001'
             print('✅ User model test passed')
 

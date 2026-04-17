@@ -1,3 +1,4 @@
+import cv2
 import numpy as np
 import torch
 import torchvision.transforms as transforms
@@ -18,38 +19,30 @@ transform = transforms.Compose([
 
 def detect_person(image_data):
     """
-    使用ResNet-18模型检测图像中是否有人
+    使用 OpenCV Haar 级联分类器检测图像中是否有人脸
     :param image_data: 图像数据 (字节流)
-    :return: 是否有人
+    :return: 是否有人脸
     """
     try:
-        # 将字节流转换为PIL图像
-        img = Image.open(io.BytesIO(image_data)).convert('RGB')
+        # 加载 Haar 级联分类器
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-        # 预处理图像
-        input_tensor = transform(img)
-        input_batch = input_tensor.unsqueeze(0)  # 添加批次维度
+        # 将字节流转换为图像
+        nparr = np.frombuffer(image_data, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        # 使用GPU（如果可用）
-        if torch.cuda.is_available():
-            input_batch = input_batch.to('cuda')
-            model.to('cuda')
+        # 转换为灰度图像
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        # 进行预测
-        with torch.no_grad():
-            output = model(input_batch)
+        # 检测人脸
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
 
-        # 获取预测结果
-        _, predicted = torch.max(output, 1)
-
-        # ImageNet类别中，人的类别编号是151-268（包括人、运动员等）
-        # 这里简化处理，只要预测结果在这个范围内，就认为检测到人
-        predicted_class = predicted.item()
-        has_person = 151 <= predicted_class <= 268
+        # 如果检测到人脸，返回 True
+        has_person = len(faces) > 0
 
         print(f"AI检测结果: {'有人' if has_person else '无人'}")
         return has_person
     except Exception as e:
         print(f"AI检测失败: {str(e)}")
-        # 检测失败时默认返回True，避免误判
+        # 检测失败时默认返回 True，避免误判
         return True

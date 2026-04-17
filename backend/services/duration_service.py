@@ -177,28 +177,8 @@ def get_rank_list(db: Session, study_date: date, limit: int = 10) -> list:
     # 从缓存获取
     rank_data = r.hgetall(key)
     
-    if not rank_data:
-        # 缓存不存在，从数据库获取并更新缓存
-        records = db.query(StudyDuration).filter(
-            StudyDuration.study_date == study_date,
-            StudyDuration.beat_percent.isnot(None)
-        ).order_by(
-            StudyDuration.beat_percent.desc()
-        ).limit(limit).all()
-        
-        rank_list = []
-        for record in records:
-            rank_list.append({
-                "user_id": record.user_id,
-                "beat_percent": record.beat_percent,
-                "total_minutes": record.total_minutes
-            })
-        
-        # 更新缓存
-        update_rank_cache(db, study_date)
-        return rank_list
-    else:
-        # 从缓存构建排行榜
+    if rank_data:
+        # 缓存存在，从缓存构建排行榜
         rank_items = []
         for user_id, beat_percent_str in rank_data.items():
             # 从数据库获取用户的学习时长
@@ -217,3 +197,75 @@ def get_rank_list(db: Session, study_date: date, limit: int = 10) -> list:
         # 按击败百分比排序
         rank_items.sort(key=lambda x: x["beat_percent"], reverse=True)
         return rank_items[:limit]
+    
+    # 缓存不存在，实时计算排行榜
+    return calculate_real_time_rank_list(db, study_date, limit)
+
+
+def calculate_real_time_rank_list(db: Session, study_date: date, limit: int = 10) -> list:
+    """
+    实时计算排行榜列表（无需等待定时任务）
+    :param db: 数据库会话
+    :param study_date: 学习日期
+    :param limit: 返回数量限制
+    :return: 排行榜列表
+    """
+    # 获取当日所有学习记录
+    records = db.query(StudyDuration).filter(
+        StudyDuration.study_date == study_date
+    ).all()
+    
+    if not records:
+        return []
+    
+    # 计算有效用户数（学习时长>0）
+    effective_users = len([r for r in records if r.total_minutes > 0])
+    
+    if effective_users == 0:
+        return []
+    
+    # 实时计算每个用户的击败百分比
+    rank_items = []
+    for record in records:
+        if record.total_minutes > 0:
+            # 计算学习时长小于当前用户的人数
+            less_count = len([r for r in records if r.total_minutes < record.total_minutes and r.total_minutes > 0])
+            
+            # 计算击败百分比
+            beat_percent = (less_count / effective_users) * 100
+            # 四舍五入到两位小数
+            beat_percent = round(beat_percent, 2)
+            
+            rank_items.append({
+                "user_id": record.user_id,
+                "beat_percent": beat_percent,
+                "total_minutes": record.total_minutes
+            })
+    
+    # 按击败百分比排序
+    rank_items.sort(key=lambda x: x["beat_percent"], reverse=True)
+    
+    # 更新缓存（下次查询可以直接使用）
+    update_real_time_rank_cache(rank_items, study_date)
+    
+    return rank_items[:limit]
+
+
+def update_real_time_rank_cache(rank_items: list, study_date: date) -> None:
+    """
+    更新实时排行榜缓存（10分钟过期）
+    :param rank_items: 排行榜数据
+    :param study_date: 学习日期
+    """
+    r = cache._redis()
+    key = f"rank:beat:{study_date}"
+    
+    # 清空现有缓存
+    r.delete(key)
+    
+    # 更新缓存
+    for item in rank_items:
+        r.hset(key, item["user_id"], str(item["beat_percent"]))
+    
+    # 设置缓存过期时间（10分钟）
+    r.expire(key, 10 * 60)

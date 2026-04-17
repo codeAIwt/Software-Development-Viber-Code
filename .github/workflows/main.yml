@@ -209,43 +209,43 @@ jobs:
     - name: Run API endpoint tests (TC-005, TC-006)
       run: |
         cd backend
-        python -c "
-from controllers.user_controller import router as user_router
-from controllers.room_controller import router as room_router
-from controllers.duration_controller import router as duration_router
-import sys
+        python - <<'PY'
+        from controllers.user_controller import router as user_router
+        from controllers.room_controller import router as room_router
+        from controllers.duration_controller import router as duration_router
+        import sys
 
-try:
-    # Test router imports
-    assert user_router is not None
-    assert room_router is not None
-    assert duration_router is not None
-    
-    # Test route paths
-    user_routes = [route.path for route in user_router.routes]
-    room_routes = [route.path for route in room_router.routes]
-    duration_routes = [route.path for route in duration_router.routes]
-    
-    print(f'✅ User routes: {len(user_routes)} routes found')
-    print(f'✅ Room routes: {len(room_routes)} routes found')
-    print(f'✅ Duration routes: {len(duration_routes)} routes found')
-    
-    # Verify critical endpoints exist
-    expected_endpoints = ['/api/user/register', '/api/user/login', '/api/room/create', '/api/duration/daily']
-    all_routes = user_routes + room_routes + duration_routes
-    
-    for endpoint in expected_endpoints:
-        if any(endpoint in route for route in all_routes):
-            print(f'✅ Endpoint {endpoint} found')
-        else:
-            print(f'⚠️  Endpoint {endpoint} not found')
-    
-    print('✅ API endpoint test passed')
-    
-except Exception as e:
-    print(f'❌ API endpoint test failed: {e}')
-    sys.exit(1)
-"
+        try:
+            # Test router imports
+            assert user_router is not None
+            assert room_router is not None
+            assert duration_router is not None
+
+            # Test route paths
+            user_routes = [route.path for route in user_router.routes]
+            room_routes = [route.path for route in room_router.routes]
+            duration_routes = [route.path for route in duration_router.routes]
+
+            print(f'✅ User routes: {len(user_routes)} routes found')
+            print(f'✅ Room routes: {len(room_routes)} routes found')
+            print(f'✅ Duration routes: {len(duration_routes)} routes found')
+
+            # Verify critical endpoints exist
+            expected_endpoints = ['/api/user/register', '/api/user/login', '/api/room/create', '/api/duration/daily']
+            all_routes = user_routes + room_routes + duration_routes
+
+            for endpoint in expected_endpoints:
+                if any(endpoint in route for route in all_routes):
+                    print(f'✅ Endpoint {endpoint} found')
+                else:
+                    print(f'⚠️  Endpoint {endpoint} not found')
+
+            print('✅ API endpoint test passed')
+
+        except Exception as e:
+            print(f'❌ API endpoint test failed: {e}')
+            sys.exit(1)
+        PY
     
     - name: Run Redis integration test (TC-007, TC-008)
       run: |

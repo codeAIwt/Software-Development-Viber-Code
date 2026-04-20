@@ -21,6 +21,7 @@ const leaveLoading = ref(false);
 const videoRef = ref(null);
 const canvasRef = ref(null);
 const privacyMode = ref('blur');
+const currentUserId = ref(localStorage.getItem('user_id'));
 const privacyModes = [
   { value: 'blur', label: '模糊模式' },
   { value: 'hand', label: '手部遮挡模式' },
@@ -77,7 +78,7 @@ const ai = useAiDetection({
   intervalMs: 10000,
   detectFn: studyRoomApi.detectPerson,
   roomIdGetter: () => route.params.id,
-  userIdGetter: () => localStorage.getItem('user_id'),
+  userIdGetter: () => currentUserId.value,
   onNoPerson: async () => { await onLeave(); },
 });
 
@@ -91,7 +92,7 @@ const videoGridClass = computed(() => {
   return 'video-grid-8';
 });
 
-const isCreator = computed(() => localStorage.getItem('user_id') === roomInfo.value.creator_id);
+const isCreator = computed(() => currentUserId.value === roomInfo.value.creator_id);
 
 const roomDuration = computed(() => {
   if (!roomInfo.value.created_ts_ms) return '00:00';
@@ -145,13 +146,16 @@ async function updateTheme() {
   if (!newTheme.value) { ui.showToast('请选择主题'); return; }
   updatingTheme.value = true;
   try {
+    console.debug('[StudyRoomDetail] updateTheme: sending update', { roomId: route.params.id, theme: newTheme.value });
     const { data } = await updateRoom(route.params.id, newTheme.value);
+    console.debug('[StudyRoomDetail] updateTheme: response', data);
     if (data.code === 200) {
       Object.assign(roomInfo.value, data.data);
       ui.showToast('主题修改成功');
       closeThemeDialog();
     } else ui.showToast(data.msg || '修改失败');
   } catch (e) {
+    console.error('[StudyRoomDetail] updateTheme error', e);
     ui.showToast(e.response?.data?.msg || e.message || '修改失败');
   } finally { updatingTheme.value = false; }
 }
@@ -162,14 +166,17 @@ function closeDestroyDialog() { showDestroyDialog.value = false; }
 async function destroyRoom() {
   destroying.value = true;
   try {
+    console.debug('[StudyRoomDetail] destroyRoom: sending destroy', { roomId: route.params.id });
     stopPolling();
     const { data } = await destroyRoomApi(route.params.id);
+    console.debug('[StudyRoomDetail] destroyRoom: response', data);
     if (data.code === 200) {
       stopCamera();
       ui.showToast('房间已销毁');
       router.push('/study-room');
     } else ui.showToast(data.msg || '销毁失败');
   } catch (e) {
+    console.error('[StudyRoomDetail] destroyRoom error', e);
     ui.showToast(e.response?.data?.msg || e.message || '销毁失败');
   } finally { destroying.value = false; closeDestroyDialog(); }
 }
@@ -177,25 +184,47 @@ async function destroyRoom() {
 async function fetchCurrentUserInfo() {
   try {
     const { data } = await userApi.fetchCurrentUser();
-    if (data.code === 200) localStorage.setItem('user_id', data.data.id);
+    if (data.code === 200) {
+      // 后端返回字段为 user_id
+      localStorage.setItem('user_id', data.data.user_id);
+      currentUserId.value = data.data.user_id;
+    }
   } catch (e) { console.error('获取当前用户信息失败:', e); }
 }
 
 // beforeunload handler
-function handleBeforeUnload() {
+async function handleBeforeUnload() {
   try {
     const roomId = route.params.id;
     const token = getToken();
     if (!roomId) return;
+    
+    // 停止所有组件
     stopPolling();
     stopCamera();
     closeRoom();
     cleanupPeerConnections();
-    const payload = JSON.stringify({ room_id: roomId });
+    
+    // 使用同步XMLHttpRequest确保请求能发送出去
     try {
-      fetch('/api/room/leave', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: payload, keepalive: true });
-    } catch (err) { }
-  } catch (err) { }
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/room/leave', false); // 同步请求
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.send(JSON.stringify({ room_id: roomId }));
+    } catch (err) {
+      console.error('同步离开请求失败:', err);
+      // 备用方案：使用navigator.sendBeacon
+      try {
+        const blob = new Blob([JSON.stringify({ room_id: roomId })], { type: 'application/json' });
+        navigator.sendBeacon('/api/room/leave', blob);
+      } catch (beaconErr) {
+        console.error('sendBeacon也失败:', beaconErr);
+      }
+    }
+  } catch (err) {
+    console.error('beforeunload处理错误:', err);
+  }
 }
 
 onMounted(async () => {
@@ -206,7 +235,7 @@ onMounted(async () => {
 
   // init signaling (websocket + webRTC)
   const roomId = route.params.id;
-  const userId = localStorage.getItem('user_id');
+  const userId = currentUserId.value;
   connectRoom(roomId, userId, { onError: (e) => console.error(e) });
 
   timer.value = setInterval(() => { currentTime.value = Date.now(); }, 1000);
@@ -221,8 +250,21 @@ onMounted(async () => {
   });
 
   ai.start();
+  
+  // 添加页面可见性变化监听
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  
+  // 添加beforeunload事件监听
   window.addEventListener('beforeunload', handleBeforeUnload);
 });
+
+// 页面可见性变化处理
+function handleVisibilityChange() {
+  if (document.visibilityState === 'hidden') {
+    // 页面隐藏时（如切换到其他标签页），发送离开请求
+    handleBeforeUnload();
+  }
+}
 
 onUnmounted(() => {
   if (timer.value) clearInterval(timer.value);
@@ -230,7 +272,10 @@ onUnmounted(() => {
   closeRoom();
   cleanupPeerConnections();
   stopPolling();
-  try { window.removeEventListener('beforeunload', handleBeforeUnload); } catch (err) {}
+  try { 
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.removeEventListener('beforeunload', handleBeforeUnload); 
+  } catch (err) {}
   stopCamera();
 });
 </script>
@@ -279,9 +324,6 @@ onUnmounted(() => {
     <div class="card">
       <h3>摄像头</h3>
       <div class="camera-controls">
-        <button class="secondary" @click="toggleVideo">
-          {{ videoVisible ? '隐藏视频' : '显示视频' }}
-        </button>
         <div class="privacy-mode-selector">
           <label>隐私模式：</label>
           <select v-model="privacyMode" @change="changePrivacyMode(privacyMode)">

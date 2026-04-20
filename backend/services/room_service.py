@@ -402,6 +402,8 @@ def leave_room(db: Session, user_id: str, room_id: str) -> dict:
     r = cache._redis()
     now_ms = _now_ms()
 
+    print(f"[room_service.leave_room] start: user_id={user_id} room_id={room_id}")
+
     if not cache.acquire_room_leave_lock(room_id):
         raise RoomServiceError(409, "leave timeout", {})
 
@@ -410,7 +412,13 @@ def leave_room(db: Session, user_id: str, room_id: str) -> dict:
         if not meta:
             raise RoomServiceError(404, "房间不存在", {})
         active_key = cache.room_users_active_key(room_id)
-        if not r.sismember(active_key, user_id):
+        try:
+            is_active = r.sismember(active_key, user_id)
+        except Exception as _e:
+            print(f"[room_service.leave_room] sismember check failed: {_e}")
+            is_active = False
+        print(f"[room_service.leave_room] is_active={is_active} for user_id={user_id}")
+        if not is_active:
             raise RoomServiceError(403, "不在房间中", {})
 
         theme = meta.get("theme")
@@ -422,10 +430,14 @@ def leave_room(db: Session, user_id: str, room_id: str) -> dict:
 
         # 计算学习时长
         join_time_str = r.get(cache.user_join_time_key(room_id, user_id))
+        print(f"[room_service.leave_room] join_time_str for user {user_id}: {join_time_str}")
         study_duration = 0
         if join_time_str:
-            join_time = int(join_time_str)
-            study_duration = now_ms - join_time
+            try:
+                join_time = int(join_time_str)
+                study_duration = now_ms - join_time
+            except Exception as _e:
+                print(f"[room_service.leave_room] failed to parse join_time: {_e}")
         
         # 转换为分钟
         study_duration_minutes = study_duration // 60000
@@ -546,6 +558,7 @@ def update_room_info(db: Session, user_id: str, room_id: str, theme: str = None)
     meta = cache.get_room_meta(room_id)
     if not meta:
         raise RoomServiceError(404, "房间不存在", {})
+    print(f"[room_service.update_room_info] called by user_id={user_id} room_id={room_id} theme={theme} meta_creator={meta.get('creator_id')}")
     
     # 检查是否是创建者
     if meta.get("creator_id") != user_id:
@@ -559,8 +572,9 @@ def update_room_info(db: Session, user_id: str, room_id: str, theme: str = None)
         "updated_ts_ms": str(now_ms),
     }
     
-    if theme:
-        if theme not in ALLOWED_THEMES:
+    if theme is not None:
+        # 如果 ALLOWED_THEMES 非空，则执行严格校验；为空则允许任意主题
+        if ALLOWED_THEMES and theme not in ALLOWED_THEMES:
             raise RoomServiceError(400, "主题非法", {})
         update_data["theme"] = theme
     

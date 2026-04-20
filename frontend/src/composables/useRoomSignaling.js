@@ -17,9 +17,11 @@ export function useRoomSignaling(getLocalStream) {
         const { type, user_id, data } = message || {};
         switch (type) {
             case 'user_join':
+                console.debug('[useRoomSignaling] user_join', user_id);
                 handleUserJoin(user_id);
                 break;
             case 'user_leave': {
+                console.debug('[useRoomSignaling] user_leave', user_id);
                 const pc = peerConnections.value.get(user_id);
                 if (pc) {
                     try { pc.close(); } catch (e) { }

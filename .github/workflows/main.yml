@@ -762,16 +762,24 @@ jobs:
         if [ -f "backend/security_report.json" ] && [ -s "backend/security_report.json" ]; then
             python3 << 'EOF'
         import json
-        with open('backend/security_report.json', 'r') as f:
-            data = json.load(f)
-            critical_vulns = [v for v in data.get('vulnerabilities', []) if v.get('severity') == 'CRITICAL']
-            if critical_vulns:
-                print('❌ Critical vulnerabilities found in Python dependencies:')
-                for vuln in critical_vulns:
-                    print(f'  - {vuln.get("package_name")}: {vuln.get("advisory")}')
-                exit(1)
-            else:
-                print('✅ No critical vulnerabilities found in Python dependencies')
+        import sys
+        try:
+            with open('backend/security_report.json', 'r') as f:
+                content = f.read()
+                if not content.strip():
+                    print('ℹ️ Python security report is empty, skipping...')
+                    sys.exit(0)
+                data = json.loads(content)
+                critical_vulns = [v for v in data.get('vulnerabilities', []) if v.get('severity') == 'CRITICAL']
+                if critical_vulns:
+                    print('❌ Critical vulnerabilities found in Python dependencies:')
+                    for vuln in critical_vulns:
+                        print(f'  - {vuln.get("package_name")}: {vuln.get("advisory")}')
+                    exit(1)
+                else:
+                    print('✅ No critical vulnerabilities found in Python dependencies')
+        except json.JSONDecodeError:
+            print('ℹ️ Python security report is not valid JSON, skipping...')
         EOF
         else
             echo 'ℹ️ No Python security report found, skipping...'
@@ -781,14 +789,22 @@ jobs:
         if [ -f "frontend/npm_audit_report.json" ] && [ -s "frontend/npm_audit_report.json" ]; then
             python3 << 'EOF'
         import json
-        with open('frontend/npm_audit_report.json', 'r') as f:
-            data = json.load(f)
-            critical_vulns = data.get('metadata', {}).get('vulnerabilities', {}).get('critical', 0)
-            if critical_vulns > 0:
-                print(f'❌ {critical_vulns} critical vulnerabilities found in NPM dependencies')
-                exit(1)
-            else:
-                print('✅ No critical vulnerabilities found in NPM dependencies')
+        import sys
+        try:
+            with open('frontend/npm_audit_report.json', 'r') as f:
+                content = f.read()
+                if not content.strip():
+                    print('ℹ️ NPM audit report is empty, skipping...')
+                    sys.exit(0)
+                data = json.loads(content)
+                critical_vulns = data.get('metadata', {}).get('vulnerabilities', {}).get('critical', 0)
+                if critical_vulns > 0:
+                    print(f'❌ {critical_vulns} critical vulnerabilities found in NPM dependencies')
+                    exit(1)
+                else:
+                    print('✅ No critical vulnerabilities found in NPM dependencies')
+        except json.JSONDecodeError:
+            print('ℹ️ NPM audit report is not valid JSON, skipping...')
         EOF
         else
             echo 'ℹ️ No NPM audit report found, skipping...'

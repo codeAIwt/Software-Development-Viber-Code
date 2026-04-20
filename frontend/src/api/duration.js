@@ -1,19 +1,5 @@
 /** 时长 / 排行榜接口 */
-import axios from "axios";
-import { getToken } from "../utils/auth";
-
-const client = axios.create({
-  baseURL: "/api",
-  timeout: 20000,
-});
-
-client.interceptors.request.use((config) => {
-  const token = getToken();
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+import client from "./client";
 
 /**
  * GET /api/duration/daily — 获取每日学习时长

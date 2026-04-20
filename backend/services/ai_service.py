@@ -1,3 +1,4 @@
+import os
 import cv2
 import numpy as np
 # import torch
@@ -24,22 +25,33 @@ def detect_person(image_data):
     :return: 是否有人脸
     """
     try:
-        # 加载 Haar 级联分类器
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        # 加载 Haar 级联分类器（更健壮的加载与容错处理）
+        cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
+        face_cascade = cv2.CascadeClassifier(cascade_path)
+        if face_cascade.empty():
+            print(f"AI检测错误: Haar 级联分类器加载失败: {cascade_path}")
+            # 级联加载失败时为了避免误判，默认认为有人
+            return True
 
         # 将字节流转换为图像
         nparr = np.frombuffer(image_data, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            print("AI检测错误: 无法解码图像数据")
+            return True
 
         # 转换为灰度图像
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        # 检测人脸
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+        # 检测人脸（捕获 OpenCV 专用错误并降级处理）
+        try:
+            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+        except cv2.error as e:
+            print(f"AI检测失败(OpenCV错误): {e}")
+            return True
 
         # 如果检测到人脸，返回 True
         has_person = len(faces) > 0
-
         print(f"AI检测结果: {'有人' if has_person else '无人'}")
         return has_person
     except Exception as e:

@@ -69,6 +69,147 @@ project/
 └── docs/
     └── online-study-prd.md
 
+## 核心功能模块说明
+
+### 前端功能模块
+
+#### 用户系统模块
+- **Login.vue / Register.vue**: 用户登录注册页面
+- **Personal.vue**: 个人信息管理页面
+- **Tags.vue**: 标签选择页面（首次登录）
+
+#### 自习室管理模块
+- **Home.vue**: 首页，显示自习室列表和创建入口
+- **StudyRoom.vue**: 自习室列表页面
+- **StudyRoomDetail.vue**: 自习室详情页面，包含实时通信和AI检测
+
+#### 组件库
+- **CommonToast.vue**: 通用提示组件
+- **PrivacyMode.vue**: 隐私模式切换组件
+- **StudyRoomList.vue**: 自习室列表展示组件
+
+#### Composables（逻辑复用）
+- **useCamera.js**: 摄像头访问和管理逻辑
+- **useWebSocket.js**: WebSocket 连接管理
+- **useWebRTC.js**: WebRTC 视频通信（预留扩展）
+- **useRoomData.js**: 房间数据轮询和状态管理
+- **useAiDetection.js**: AI 检测逻辑封装
+- **useRoomSignaling.js**: 房间信令通信管理
+
+#### API 接口层
+- **user.js**: 用户相关 API 调用
+- **studyRoom.js**: 自习室相关 API 调用
+- **duration.js**: 学习时长相关 API 调用
+
+### 后端功能模块
+
+#### 控制器层 (Controllers)
+- **user_controller.py**: 用户注册、登录、信息管理接口
+- **room_controller.py**: 自习室创建、加入、管理接口
+- **duration_controller.py**: 学习时长统计接口
+
+#### 服务层 (Services)
+- **user_service.py**: 用户业务逻辑处理
+- **room_service.py**: 自习室业务逻辑处理
+- **duration_service.py**: 学习时长业务逻辑处理
+- **ai_service.py**: AI 检测服务接口
+
+#### 数据模型层 (Models)
+- **user.py**: 用户数据模型
+- **study_room.py**: 自习室数据模型
+- **room_user.py**: 房间用户关系模型
+- **study_duration.py**: 学习时长数据模型
+
+#### 工具层 (Utils)
+- **auth.py**: JWT 认证和权限验证
+- **cache.py**: Redis 缓存操作封装
+- **ws_client.py**: WebSocket 客户端管理
+
+#### WebSocket 服务
+- **server.py**: WebSocket 连接管理和消息广播
+
+#### 配置层 (Config)
+- **db.py**: 数据库连接配置
+- **settings.py**: 应用配置管理
+- **ws.py**: WebSocket 配置
+
+## 数据流说明
+
+### 用户操作流程
+1. 用户注册/登录 → 用户认证 → 进入首页
+2. 创建/加入自习室 → 房间状态更新 → 进入自习室详情
+3. 开启摄像头 → AI 检测启动 → 学习时长记录
+4. 离开自习室 → 时长统计 → 状态同步
+
+### 实时通信流程
+1. WebSocket 连接建立 → 房间状态订阅
+2. 用户加入/离开 → 消息广播 → 界面更新
+3. AI 检测状态 → 实时通知 → 用户状态更新
+
+### 数据持久化流程
+1. 用户操作 → API 调用 → 数据库操作
+2. 房间状态 → Redis 缓存 → 实时同步
+3. 学习时长 → 定时记录 → 数据库存储
+
+## 技术架构特点
+
+### 前端架构优势
+- **组件化设计**: 高内聚低耦合，便于维护和测试
+- **Composition API**: 逻辑复用，代码组织清晰
+- **响应式设计**: 适配不同设备，用户体验良好
+
+### 后端架构优势
+- **异步框架**: FastAPI 提供高性能 API 服务
+- **分层架构**: 控制器-服务-模型分层清晰
+- **缓存优化**: Redis 提升实时性能
+- **WebSocket 支持**: 实时通信能力强大
+
+### 数据库设计
+- **关系型数据库**: MySQL/SQLite 支持事务一致性
+- **缓存层**: Redis 提供高速数据访问
+- **数据模型**: 合理的表结构和关系设计
+
+## 部署和运维
+
+### 开发环境
+- 前端: Vite 开发服务器 + 热重载
+- 后端: Uvicorn 开发服务器 + 自动重载
+- 数据库: SQLite（默认）或本地 MySQL
+
+### 生产环境
+- 前端: Nginx 静态文件服务
+- 后端: Uvicorn + Gunicorn 多进程
+- 数据库: MySQL 集群 + Redis 集群
+- 监控: 日志收集 + 性能监控
+
+## 扩展性考虑
+
+### 功能扩展
+- 支持更多 AI 检测算法
+- 添加视频会议功能
+- 集成第三方学习资源
+- 支持移动端应用
+
+### 性能扩展
+- 数据库读写分离
+- Redis 集群部署
+- CDN 静态资源加速
+- 微服务架构拆分
+
+## 安全考虑
+
+### 数据安全
+- 密码加密存储
+- JWT Token 认证
+- SQL 注入防护
+- XSS 攻击防护
+
+### 隐私保护
+- 摄像头访问权限控制
+- 用户数据加密传输
+- 隐私模式支持
+- 数据访问权限控制
+
 变更记录（最近）:
 - 前端:
     - 新增 `src/composables/` 目录，主要文件：useCamera.js、useWebSocket.js、useWebRTC.js、useRoomData.js、useAiDetection.js、useRoomSignaling.js。

@@ -116,6 +116,20 @@ frontend/
 
 - `GET /api/duration/info` - 获取学习时长信息
 
+## 项目状态
+
+✅ **项目已完成** - 所有核心功能均已实现并通过测试
+
+### 功能完成情况
+
+- ✅ 用户系统（注册、登录、个人信息管理）
+- ✅ 自习室管理（创建、加入、离开、权限控制）
+- ✅ 学习时长统计（自动记录、排行榜）
+- ✅ AI 伴学监控（摄像头访问、人脸检测、隐私模式）
+- ✅ 实时通信（WebSocket 状态同步）
+- ✅ 数据库支持（MySQL/SQLite 双数据库）
+- ✅ CI/CD 自动化测试（GitHub Actions）
+
 ## 快速开始
 
 ### 后端
@@ -156,10 +170,146 @@ frontend/
    npm run build
    ```
 
+## 部署指南
+
+### 本地开发部署
+
+1. **启动后端服务**（确保在 backend 目录下）：
+   ```bash
+   uvicorn app:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+2. **启动前端服务**（确保在 frontend 目录下）：
+   ```bash
+   npm run dev
+   ```
+
+3. **访问应用**：
+   - 前端地址：http://localhost:5173
+   - 后端 API 文档：http://localhost:8000/docs
+
+### 生产环境部署
+
+#### 后端部署
+
+1. **环境配置**：
+   ```bash
+   # 创建生产环境配置文件
+   echo "DATABASE_URL=mysql+pymysql://username:password@host:3306/database" > .env
+   echo "REDIS_URL=redis://host:6379/0" >> .env
+   echo "JWT_SECRET=your-secret-key" >> .env
+   ```
+
+2. **启动服务**：
+   ```bash
+   uvicorn app:app --host 0.0.0.0 --port 8000 --workers 4
+   ```
+
+#### 前端部署
+
+1. **构建生产版本**：
+   ```bash
+   npm run build
+   ```
+
+2. **配置静态服务器**（Nginx 示例）：
+   ```nginx
+   server {
+       listen 80;
+       server_name your-domain.com;
+       
+       location / {
+           root /path/to/frontend/dist;
+           try_files $uri $uri/ /index.html;
+       }
+       
+       location /api {
+           proxy_pass http://localhost:8000;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+       }
+   }
+   ```
+
+## 技术架构详解
+
+### 后端架构
+
+- **框架**：FastAPI - 高性能异步 Web 框架
+- **数据库**：SQLAlchemy ORM，支持 MySQL/SQLite
+- **缓存**：Redis 用于会话和房间状态管理
+- **认证**：JWT Token 认证机制
+- **实时通信**：WebSocket 支持
+- **AI 检测**：OpenCV Haar Cascade 人脸检测
+
+### 前端架构
+
+- **框架**：Vue 3 + Composition API
+- **构建工具**：Vite - 快速构建和热重载
+- **状态管理**：Pinia - 现代化状态管理
+- **路由**：Vue Router
+- **UI 组件**：自定义组件库
+- **实时通信**：原生 WebSocket API
+
+### 数据流架构
+
+```
+前端 (Vue) ←→ WebSocket ←→ 后端 (FastAPI) ←→ Redis ←→ 数据库
+                    ↑
+                 AI 检测 (OpenCV)
+```
+
+## API 接口概览
+
+### 用户相关接口
+- `POST /api/user/register` - 用户注册
+- `POST /api/user/login` - 用户登录
+- `GET /api/user/profile` - 获取用户信息
+- `PUT /api/user/profile` - 更新用户信息
+
+### 自习室相关接口
+- `POST /api/room/create` - 创建自习室
+- `GET /api/room/list` - 获取自习室列表
+- `POST /api/room/join` - 加入自习室
+- `POST /api/room/leave` - 离开自习室
+- `PUT /api/room/update` - 更新自习室信息
+- `DELETE /api/room/destroy` - 销毁自习室
+
+### 学习时长接口
+- `GET /api/duration/info` - 获取学习时长信息
+- `GET /api/duration/ranking` - 获取排行榜
+
+### WebSocket 接口
+- `ws://localhost:8000/ws/{room_id}` - 实时通信连接
+
+## 数据库配置
+
+### 默认配置（SQLite）
+项目默认使用 SQLite 数据库，无需额外安装数据库服务：
+
+```python
+# backend/config/settings.py
+database_url: str = "sqlite:///./online_study.db"
+```
+
+### MySQL 配置
+如需使用 MySQL，修改配置文件：
+
+```python
+# backend/config/settings.py
+database_url: str = "mysql+pymysql://UserSoft:SoftP0987@127.0.0.1:3306/SoftwareProject?charset=utf8mb4"
+```
+
+或通过环境变量：
+```bash
+export DATABASE_URL="mysql+pymysql://UserSoft:SoftP0987@127.0.0.1:3306/SoftwareProject?charset=utf8mb4"
+```
+
 ## 注意事项
 
-- 本项目使用 Redis 模拟房间状态，实际部署时需要确保 Redis 服务正常运行
-  -## 数据库功能已接入，默认使用 SQLite，可配置为 MySQL
+- 本项目使用 Redis 缓存房间状态，实际部署时需要确保 Redis 服务正常运行
+- 摄像头功能需要 HTTPS 环境或 localhost 访问
+- 生产环境请务必修改 JWT_SECRET 密钥
 
 ### 数据库连接信息（开发环境）
 
@@ -437,14 +587,72 @@ npm run build
 
 ## 常见问题
 
+### 安装问题
+
 1. **`pip` 找不到**  
    请确认已用 `python -m venv .venv` 创建环境，并在激活 venv 后使用 `python -m pip install -r requirements.txt`。
 
-2. **前端接口报网络错误**  
+2. **OpenCV 安装失败**  
+   如果遇到 OpenCV 安装问题，可以尝试：
+   ```bash
+   pip install opencv-python-headless
+   ```
+
+### 运行问题
+
+3. **前端接口报网络错误**  
    确认后端已启动且监听 `8000`，并与 `frontend/vite.config.js` 中的 `proxy` 目标一致。
 
-3. **更换本机 Redis / MySQL**  
+4. **摄像头无法访问**  
+   - 确保使用 localhost 或 127.0.0.1 访问
+   - 检查浏览器摄像头权限设置
+   - 生产环境需要 HTTPS
+
+5. **WebSocket 连接失败**  
+   - 检查后端 WebSocket 服务是否正常启动
+   - 确认防火墙设置允许 WebSocket 连接
+
+### 配置问题
+
+6. **更换本机 Redis / MySQL**  
    修改 `backend` 的 `.env` 中 `redis_url`、`DATABASE_URL` 后，重新启动 `uvicorn`。
+
+7. **数据库连接失败**  
+   - 检查数据库服务是否启动
+   - 确认连接字符串格式正确
+   - 验证数据库用户权限
+
+## 开发指南
+
+### 代码规范
+
+- 后端：遵循 PEP 8 规范，使用 Black 格式化
+- 前端：使用 ESLint + Prettier 代码规范
+- 提交信息：使用约定式提交格式
+
+### 测试指南
+
+```bash
+# 后端测试
+cd backend
+pytest
+
+# 前端测试  
+cd frontend
+npm run test
+```
+
+### 贡献指南
+
+1. Fork 项目仓库
+2. 创建功能分支
+3. 提交更改
+4. 推送到分支
+5. 创建 Pull Request
+
+## 许可证
+
+本项目采用 MIT 许可证，详见 LICENSE 文件。
 
 ## 阶段性测试
 

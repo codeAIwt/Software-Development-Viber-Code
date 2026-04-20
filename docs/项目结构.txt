@@ -14,6 +14,13 @@ project/
 │   │   ├── router/
 │   │   │   └── index.js
 │   │   ├── store/
+│   │   ├── composables/     # 复用的 composition 函数
+│   │   │   ├── useCamera.js
+│   │   │   ├── useWebSocket.js
+│   │   │   ├── useWebRTC.js
+│   │   │   ├── useRoomData.js
+│   │   │   ├── useAiDetection.js
+│   │   │   └── useRoomSignaling.js
 │   │   ├── utils/
 │   │   │   ├── auth.js
 │   │   │   ├── video.js
@@ -61,3 +68,17 @@ project/
 │   └── AI检测.md               # AI检测配置与使用指南
 └── docs/
     └── online-study-prd.md
+
+变更记录（最近）:
+- 前端:
+    - 新增 `src/composables/` 目录，主要文件：useCamera.js、useWebSocket.js、useWebRTC.js、useRoomData.js、useAiDetection.js、useRoomSignaling.js。
+    - 已将 `StudyRoomDetail.vue` 中的信令（WebSocket）、WebRTC 以及摄像头/AI 检测逻辑迁移到上述 composables，组件仅保留视图与交互控制，轮询与后端 API 调用集中在 `useRoomData.js`。
+
+- 后端:
+    - `utils/cache.py` 新增高层 Redis 辅助函数（如房间元信息、房间成员集合、活跃用户检查、空闲房间查询等），用于抽象 Redis 键与常见操作。
+    - `services/room_service.py` 已逐步使用 `cache` 提供的高层接口，减少散布在代码中的 Redis 键操作，修复了若干引用错误，并改善了离开/销毁流程的一致性。
+    - `app.py` 的 WebSocket 断开处理（WebSocketDisconnect）已加入后端补偿逻辑，断开时会调用 `room_service.leave_room(...)` 以确保用户在后端/Redis 中被清理并记录学习时长。
+
+- 文档 & 建议:
+    - 已在本文件记录 composables 位置与后端改动。建议团队拉取最新代码后本地运行并验证：加入/退出、房间销毁、浏览器关闭补偿、AI 自动退出等交互。
+    - 建议为 `useRoomSignaling`、`useRoomData` 添加单元/集成测试以覆盖关键行为（断线补偿、轮询终止、AI 无人退出）。

@@ -1,56 +1,87 @@
 <script setup>
-import { useRoute, useRouter } from "vue-router";
-import PrivacyMode from "../components/PrivacyMode.vue";
-import * as studyRoomApi from "../api/studyRoom";
-import { useUiStore } from "../store";
-import { ref, onMounted, onUnmounted, computed, watch } from "vue";
-import { startCamera, stopCamera, checkCameraPermission } from "../utils/video";
-import { getToken } from "../utils/auth";
-import * as userApi from "../api/user";
+import { useRoute, useRouter } from 'vue-router';
+import PrivacyMode from '../components/PrivacyMode.vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { getToken } from '../utils/auth';
+import * as studyRoomApi from '../api/studyRoom';
+import * as userApi from '../api/user';
+import { useUiStore } from '../store';
+
+import { useCamera } from '../composables/useCamera';
+import { useRoomData } from '../composables/useRoomData';
+import { useAiDetection } from '../composables/useAiDetection';
+import { useRoomSignaling } from '../composables/useRoomSignaling';
 
 const route = useRoute();
 const router = useRouter();
 const ui = useUiStore();
 
+// UI state
 const leaveLoading = ref(false);
-const cameraError = ref(false);
-const cameraLoading = ref(true);
 const videoRef = ref(null);
 const canvasRef = ref(null);
-
-// 摄像头状态
-const cameraOn = ref(true);
-
-// 隐私模式
-const privacyMode = ref('blur'); // blur 或 hand 或 off
+const privacyMode = ref('blur');
 const privacyModes = [
   { value: 'blur', label: '模糊模式' },
   { value: 'hand', label: '手部遮挡模式' },
   { value: 'off', label: '关闭隐私模式' }
 ];
-
-// 视频显示状态
 const videoVisible = ref(true);
 
-// 房间信息
-const roomInfo = ref({
-  creator_id: '',
-  created_ts_ms: '',
-  theme: '',
-  max_people: 0,
-  current_people: 0,
-  status: '',
-  tags: [],
-  users: []
+const showThemeDialog = ref(false);
+const newTheme = ref('');
+const updatingTheme = ref(false);
+const showDestroyDialog = ref(false);
+const destroying = ref(false);
+const showDurationDialog = ref(false);
+const studyDuration = ref(0);
+
+// time
+const joinTime = ref(Date.now());
+const currentTime = ref(Date.now());
+const timer = ref(null);
+
+// room data (API + polling)
+const {
+  roomInfo,
+  userInfoMap,
+  loadingUserInfo,
+  creatorInfo,
+  loadingCreatorInfo,
+  fetchRoomInfo,
+  startPolling,
+  stopPolling,
+  leaveRoom,
+  updateRoom,
+  destroyRoom: destroyRoomApi,
+} = useRoomData();
+
+// camera composable
+const {
+  localStream,
+  cameraOn,
+  cameraError,
+  cameraLoading,
+  initCamera,
+  stopCamera,
+  applyPrivacyMode,
+} = useCamera(videoRef, canvasRef, privacyMode);
+
+// signaling (websocket + webRTC)
+const { videoStreams, peerConnections, connectRoom, closeRoom, sendSignal, cleanupPeerConnections } = useRoomSignaling(() => localStream.value);
+
+// AI detection (will call onLeave when no person detected)
+const ai = useAiDetection({
+  videoRef,
+  enabled: true,
+  intervalMs: 10000,
+  detectFn: studyRoomApi.detectPerson,
+  roomIdGetter: () => route.params.id,
+  userIdGetter: () => localStorage.getItem('user_id'),
+  onNoPerson: async () => { await onLeave(); },
 });
 
-// 视频流管理
-const videoStreams = ref(new Map()); // userId -> MediaStream
-const localStream = ref(null);
-const ws = ref(null);
-const peerConnections = ref(new Map()); // userId -> RTCPeerConnection
-
-// 视频网格布局
+// computed
 const videoGridClass = computed(() => {
   const count = roomInfo.value.users.length;
   if (count === 1) return 'video-grid-1';
@@ -60,672 +91,146 @@ const videoGridClass = computed(() => {
   return 'video-grid-8';
 });
 
-// 用户信息映射
-const userInfoMap = ref(new Map());
-const loadingUserInfo = ref(false);
+const isCreator = computed(() => localStorage.getItem('user_id') === roomInfo.value.creator_id);
 
-// 当前用户是否是创建者
-const isCreator = computed(() => {
-  const currentUserId = localStorage.getItem('user_id');
-  return currentUserId === roomInfo.value.creator_id;
-});
-
-// 修改主题相关
-const showThemeDialog = ref(false);
-const newTheme = ref('');
-const updatingTheme = ref(false);
-
-// 销毁房间相关
-const showDestroyDialog = ref(false);
-const destroying = ref(false);
-
-// 学习时长弹窗
-const showDurationDialog = ref(false);
-const studyDuration = ref(0);
-
-// AI检测配置
-const aiDetectionInterval = ref(10000); // 检测间隔，单位毫秒，默认1分钟
-const aiDetectionEnabled = ref(true); // 是否启用AI检测
-const aiDetectionTimer = ref(null); // 检测定时器
-
-// 创建者信息
-const creatorInfo = ref(null);
-const loadingCreatorInfo = ref(false);
-
-// 时间信息
-const joinTime = ref(Date.now());
-const currentTime = ref(Date.now());
-const timer = ref(null);
-// 房间信息轮询定时器 id
-const roomInfoTimer = ref(null);
-
-// 计算属性
 const roomDuration = computed(() => {
   if (!roomInfo.value.created_ts_ms) return '00:00';
   const duration = currentTime.value - parseInt(roomInfo.value.created_ts_ms);
-  return formatDuration(duration);
+  const seconds = Math.floor(duration / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
 });
 
 const userDuration = computed(() => {
   const duration = currentTime.value - joinTime.value;
-  return formatDuration(duration);
-});
-
-const joinTimeStr = computed(() => {
-  return new Date(joinTime.value).toLocaleString();
-});
-
-const createTimeStr = computed(() => {
-  if (!roomInfo.value.created_ts_ms) return '未知';
-  return new Date(parseInt(roomInfo.value.created_ts_ms)).toLocaleString();
-});
-
-// 格式化时间
-function formatDuration(ms) {
-  const seconds = Math.floor(ms / 1000);
+  const seconds = Math.floor(duration / 1000);
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
   return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
-}
+});
 
-// 获取用户信息
-async function getUserInfo(userId) {
-  if (userInfoMap.value.has(userId)) {
-    return userInfoMap.value.get(userId);
-  }
-  
-  try {
-    const { data } = await userApi.fetchUserInfo(userId);
-    if (data.code === 200) {
-      userInfoMap.value.set(userId, data.data);
-      return data.data;
-    }
-  } catch (e) {
-    console.error(`获取用户 ${userId} 信息失败:`, e);
-  }
-  return null;
-}
+const joinTimeStr = computed(() => new Date(joinTime.value).toLocaleString());
+const createTimeStr = computed(() => (roomInfo.value.created_ts_ms ? new Date(parseInt(roomInfo.value.created_ts_ms)).toLocaleString() : '未知'));
 
-// 获取房间信息
-async function fetchRoomInfo() {
-  try {
-    // 若路由中无房间 ID，则不再请求（防止在路由变更后继续请求 undefined）
-    const roomId = route.params.id;
-    if (!roomId) return;
-
-    const { data } = await studyRoomApi.getRoomInfo(roomId);
-    if (data.code === 200) {
-      // 如果后端表示房间已关闭，停止轮询并返回房间列表
-      if (data.data?.status === 'closed') {
-        if (roomInfoTimer.value) {
-          clearInterval(roomInfoTimer.value);
-          roomInfoTimer.value = null;
-        }
-        ui.showToast('房间已关闭，返回房间列表');
-        stopCamera();
-        if (ws.value) try { ws.value.close(); } catch (err) {}
-        cleanupPeerConnections();
-        router.push('/study-room');
-        return;
-      }
-
-      roomInfo.value = data.data;
-      // 获取创建者信息
-      if (roomInfo.value.creator_id) {
-        loadingCreatorInfo.value = true;
-        const { data: creatorData } = await userApi.fetchUserInfo(roomInfo.value.creator_id);
-        if (creatorData.code === 200) {
-          creatorInfo.value = creatorData.data;
-        }
-        loadingCreatorInfo.value = false;
-      }
-
-      // 获取房间内所有用户的信息
-      if (roomInfo.value.users && roomInfo.value.users.length > 0) {
-        loadingUserInfo.value = true;
-        for (const userId of roomInfo.value.users) {
-          await getUserInfo(userId);
-        }
-        loadingUserInfo.value = false;
-      }
-    }
-  } catch (e) {
-    const status = e.response?.status;
-    // 房间不存在或已被删除（404），停止轮询并跳回房间列表
-    if (status === 404) {
-      if (roomInfoTimer.value) {
-        clearInterval(roomInfoTimer.value);
-        roomInfoTimer.value = null;
-      }
-      ui.showToast('房间不存在或已关闭，返回房间列表');
-      stopCamera();
-      if (ws.value) try { ws.value.close(); } catch (err) {}
-      cleanupPeerConnections();
-      router.push('/study-room');
-      return;
-    }
-    console.error('获取房间信息失败:', e);
-  }
-}
-
-// 启动摄像头
-async function initCamera() {
-  cameraLoading.value = true;
-  cameraError.value = false;
-  try {
-    // 检查浏览器是否支持摄像头功能
-    const isSupported = await checkCameraPermission();
-    if (!isSupported) {
-      throw new Error('浏览器不支持摄像头功能');
-    }
-    
-    const stream = await startCamera(videoRef.value);
-    localStream.value = stream;
-    // 启动隐私模式处理
-    applyPrivacyMode();
-  } catch (error) {
-    cameraError.value = true;
-    if (error.message === '浏览器不支持摄像头功能') {
-      ui.showToast('浏览器不支持摄像头功能');
-    } else {
-      ui.showToast('无法访问摄像头，请检查权限设置');
-    }
-  } finally {
-    cameraLoading.value = false;
-  }
-}
-
-// 初始化WebSocket连接
-function initWebSocket() {
-  const roomId = route.params.id;
-  const userId = localStorage.getItem('user_id');
-  
-  // 使用与后端WebSocket服务相同的协议和主机
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${wsProtocol}//${window.location.host}/ws/room/${roomId}?user_id=${userId}`;
-  
-  ws.value = new WebSocket(wsUrl);
-  
-  ws.value.onopen = () => {
-    console.log('WebSocket connected');
-    // 发送加入房间消息
-    ws.value.send(JSON.stringify({
-      type: 'join',
-      user_id: userId,
-      room_id: roomId
-    }));
-  };
-  
-  ws.value.onmessage = async (event) => {
-    const message = JSON.parse(event.data);
-    await handleWebSocketMessage(message);
-  };
-  
-  ws.value.onclose = () => {
-    console.log('WebSocket disconnected');
-    // 清理资源
-    cleanupPeerConnections();
-  };
-  
-  ws.value.onerror = (error) => {
-    console.error('WebSocket error:', error);
-  };
-}
-
-// 处理WebSocket消息
-async function handleWebSocketMessage(message) {
-  const { type, user_id, data } = message;
-  
-  switch (type) {
-    case 'user_join':
-      await handleUserJoin(user_id);
-      break;
-    case 'user_leave':
-      handleUserLeave(user_id);
-      break;
-    case 'offer':
-      await handleOffer(user_id, data);
-      break;
-    case 'answer':
-      await handleAnswer(user_id, data);
-      break;
-    case 'ice_candidate':
-      await handleIceCandidate(user_id, data);
-      break;
-    default:
-      console.log('Unknown message type:', type);
-  }
-}
-
-// 处理用户加入
-async function handleUserJoin(userId) {
-  // 创建PeerConnection
-  const pc = createPeerConnection(userId);
-  
-  // 添加本地流
-  if (localStream.value) {
-    localStream.value.getTracks().forEach(track => {
-      pc.addTrack(track, localStream.value);
-    });
-  }
-  
-  // 创建offer
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  
-  // 发送offer
-  ws.value.send(JSON.stringify({
-    type: 'offer',
-    target_user_id: userId,
-    data: offer
-  }));
-}
-
-// 处理用户离开
-function handleUserLeave(userId) {
-  // 清理PeerConnection
-  const pc = peerConnections.value.get(userId);
-  if (pc) {
-    pc.close();
-    peerConnections.value.delete(userId);
-  }
-  
-  // 移除视频流
-  videoStreams.value.delete(userId);
-}
-
-// 处理offer
-async function handleOffer(userId, offer) {
-  // 创建PeerConnection
-  const pc = createPeerConnection(userId);
-  
-  // 添加本地流
-  if (localStream.value) {
-    localStream.value.getTracks().forEach(track => {
-      pc.addTrack(track, localStream.value);
-    });
-  }
-  
-  // 设置远程描述
-  await pc.setRemoteDescription(new RTCSessionDescription(offer));
-  
-  // 创建answer
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
-  
-  // 发送answer
-  ws.value.send(JSON.stringify({
-    type: 'answer',
-    target_user_id: userId,
-    data: answer
-  }));
-}
-
-// 处理answer
-async function handleAnswer(userId, answer) {
-  const pc = peerConnections.value.get(userId);
-  if (pc) {
-    await pc.setRemoteDescription(new RTCSessionDescription(answer));
-  }
-}
-
-// 处理ICE候选
-async function handleIceCandidate(userId, candidate) {
-  const pc = peerConnections.value.get(userId);
-  if (pc) {
-    await pc.addIceCandidate(new RTCIceCandidate(candidate));
-  }
-}
-
-// 创建PeerConnection
-function createPeerConnection(userId) {
-  const pc = new RTCPeerConnection({
-    iceServers: [
-      {
-        urls: ['stun:stun.l.google.com:19302']
-      }
-    ]
-  });
-  
-  // 处理ICE候选
-  pc.onicecandidate = (event) => {
-    if (event.candidate) {
-      ws.value.send(JSON.stringify({
-        type: 'ice_candidate',
-        target_user_id: userId,
-        data: event.candidate
-      }));
-    }
-  };
-  
-  // 处理远程流
-  pc.ontrack = (event) => {
-    videoStreams.value.set(userId, event.streams[0]);
-  };
-  
-  // 存储PeerConnection
-  peerConnections.value.set(userId, pc);
-  
-  return pc;
-}
-
-// 清理PeerConnections
-function cleanupPeerConnections() {
-  peerConnections.value.forEach(pc => {
-    pc.close();
-  });
-  peerConnections.value.clear();
-  videoStreams.value.clear();
-}
-
-// 应用隐私模式
-function applyPrivacyMode() {
-  if (!videoRef.value || !canvasRef.value) return;
-  
-  const video = videoRef.value;
-  const canvas = canvasRef.value;
-  const ctx = canvas.getContext('2d');
-  
-  // 设置canvas尺寸
-  canvas.width = video.videoWidth || 640;
-  canvas.height = video.videoHeight || 480;
-  
-  function draw() {
-    if (!cameraOn.value) return;
-    
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
-    if (privacyMode.value === 'blur') {
-      // 模糊模式
-      ctx.filter = 'blur(10px)';
-      ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height);
-      ctx.filter = 'none';
-    } else if (privacyMode.value === 'hand') {
-      // 手部遮挡模式（简化实现，在画面中上方添加黑色长矩形遮挡）
-      ctx.fillStyle = 'black';
-      ctx.fillRect(0, 0, canvas.width, canvas.height * 0.6); // 上方60%区域
-    }
-    // off模式不做处理，直接显示原始画面
-    
-    requestAnimationFrame(draw);
-  }
-  
-  draw();
-}
-
-// 切换视频显示状态
-function toggleVideo() {
-  videoVisible.value = !videoVisible.value;
-}
-
-// 初始化AI检测
-function initAiDetection() {
-  if (aiDetectionEnabled.value) {
-    aiDetectionTimer.value = setInterval(async () => {
-      await captureAndDetect();
-    }, aiDetectionInterval.value);
-  }
-}
-
-// 截图并检测
-async function captureAndDetect() {
-  if (!videoRef.value || !cameraOn.value) return;
-  
-  try {
-    // 创建临时Canvas用于截图
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = videoRef.value.videoWidth || 640;
-    tempCanvas.height = videoRef.value.videoHeight || 480;
-    const tempCtx = tempCanvas.getContext('2d');
-    
-    // 绘制当前视频帧
-    tempCtx.drawImage(videoRef.value, 0, 0, tempCanvas.width, tempCanvas.height);
-    
-    // 转换为Base64
-    const base64Image = tempCanvas.toDataURL('image/jpeg');
-    
-    // 发送到后端进行检测
-    const { data } = await studyRoomApi.detectPerson(base64Image, route.params.id, localStorage.getItem('user_id'));
-    if (data.code === 200) {
-      if (!data.data.has_person) {
-        // 检测到无人，自动退出房间
-        await onLeave();
-      }
-    }
-  } catch (error) {
-    console.error('AI检测失败:', error);
-  }
-}
-
-// 切换隐私模式
-function changePrivacyMode(mode) {
-  privacyMode.value = mode;
-  applyPrivacyMode();
-}
+function toggleVideo() { videoVisible.value = !videoVisible.value; }
+function changePrivacyMode(mode) { privacyMode.value = mode; applyPrivacyMode(); }
 
 async function onLeave() {
   const roomId = route.params.id;
   leaveLoading.value = true;
   try {
-    // 先停止房间信息轮询，避免在后端处理退出时继续请求旧房间信息
-    if (roomInfoTimer.value) {
-      clearInterval(roomInfoTimer.value);
-      roomInfoTimer.value = null;
-    }
-
-    // 先停止摄像头
+    stopPolling();
     stopCamera();
-
-    const { data } = await studyRoomApi.leaveRoom(roomId);
+    const res = await leaveRoom(roomId);
+    const data = res.data;
     if (data.code !== 200) {
-      ui.showToast(data.msg || "退出失败");
+      ui.showToast(data.msg || '退出失败');
       return;
     }
-    
-    // 显示学习时长弹窗
     studyDuration.value = data.data.study_duration;
     showDurationDialog.value = true;
-    
-    // 3秒后跳转到房间列表
-    setTimeout(() => {
-      router.push("/study-room");
-    }, 3000);
+    setTimeout(() => router.push('/study-room'), 3000);
   } catch (e) {
-    ui.showToast(e.response?.data?.msg || e.message || "退出失败");
+    ui.showToast(e.response?.data?.msg || e.message || '退出失败');
   } finally {
     leaveLoading.value = false;
   }
 }
 
-// 打开修改主题对话框
-function openThemeDialog() {
-  newTheme.value = roomInfo.value.theme;
-  showThemeDialog.value = true;
-}
+function openThemeDialog() { newTheme.value = roomInfo.value.theme; showThemeDialog.value = true; }
+function closeThemeDialog() { showThemeDialog.value = false; }
 
-// 关闭修改主题对话框
-function closeThemeDialog() {
-  showThemeDialog.value = false;
-}
-
-// 修改主题
 async function updateTheme() {
-  if (!newTheme.value) {
-    ui.showToast('请选择主题');
-    return;
-  }
-  
+  if (!newTheme.value) { ui.showToast('请选择主题'); return; }
   updatingTheme.value = true;
   try {
-    const { data } = await studyRoomApi.updateRoom(route.params.id, newTheme.value);
+    const { data } = await updateRoom(route.params.id, newTheme.value);
     if (data.code === 200) {
-      roomInfo.value = data.data;
+      Object.assign(roomInfo.value, data.data);
       ui.showToast('主题修改成功');
       closeThemeDialog();
-    } else {
-      ui.showToast(data.msg || '修改失败');
-    }
+    } else ui.showToast(data.msg || '修改失败');
   } catch (e) {
     ui.showToast(e.response?.data?.msg || e.message || '修改失败');
-  } finally {
-    updatingTheme.value = false;
-  }
+  } finally { updatingTheme.value = false; }
 }
 
-// 打开销毁房间对话框
-function openDestroyDialog() {
-  showDestroyDialog.value = true;
-}
+function openDestroyDialog() { showDestroyDialog.value = true; }
+function closeDestroyDialog() { showDestroyDialog.value = false; }
 
-// 关闭销毁房间对话框
-function closeDestroyDialog() {
-  showDestroyDialog.value = false;
-}
-
-// 销毁房间
 async function destroyRoom() {
   destroying.value = true;
   try {
-    // 停止轮询，避免销毁期间继续请求老房间信息
-    if (roomInfoTimer.value) {
-      clearInterval(roomInfoTimer.value);
-      roomInfoTimer.value = null;
-    }
-
-    const { data } = await studyRoomApi.destroyRoom(route.params.id);
+    stopPolling();
+    const { data } = await destroyRoomApi(route.params.id);
     if (data.code === 200) {
       stopCamera();
       ui.showToast('房间已销毁');
       router.push('/study-room');
-    } else {
-      ui.showToast(data.msg || '销毁失败');
-    }
+    } else ui.showToast(data.msg || '销毁失败');
   } catch (e) {
     ui.showToast(e.response?.data?.msg || e.message || '销毁失败');
-  } finally {
-    destroying.value = false;
-    closeDestroyDialog();
-  }
+  } finally { destroying.value = false; closeDestroyDialog(); }
 }
 
-// 获取当前用户信息
 async function fetchCurrentUserInfo() {
   try {
     const { data } = await userApi.fetchCurrentUser();
-    if (data.code === 200) {
-      // 存储用户ID到localStorage
-      localStorage.setItem('user_id', data.data.id);
-    }
-  } catch (e) {
-    console.error('获取当前用户信息失败:', e);
-  }
+    if (data.code === 200) localStorage.setItem('user_id', data.data.id);
+  } catch (e) { console.error('获取当前用户信息失败:', e); }
 }
 
-// 组件挂载时启动摄像头和获取房间信息
+// beforeunload handler
+function handleBeforeUnload() {
+  try {
+    const roomId = route.params.id;
+    const token = getToken();
+    if (!roomId) return;
+    stopPolling();
+    stopCamera();
+    closeRoom();
+    cleanupPeerConnections();
+    const payload = JSON.stringify({ room_id: roomId });
+    try {
+      fetch('/api/room/leave', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: payload, keepalive: true });
+    } catch (err) { }
+  } catch (err) { }
+}
+
 onMounted(async () => {
   await fetchCurrentUserInfo();
-  await fetchRoomInfo();
+  const res = await fetchRoomInfo(route.params.id);
+  if (res && res.closed) { ui.showToast('房间已关闭'); router.push('/study-room'); return; }
   await initCamera();
-  initWebSocket();
-  
-  // 启动定时器
-  timer.value = setInterval(() => {
-    currentTime.value = Date.now();
-  }, 1000);
-  
-  // 定期刷新房间信息，以获取最新的用户列表
-  roomInfoTimer.value = setInterval(async () => {
-    await fetchRoomInfo();
-  }, 5000); // 每5秒刷新一次
-  
-  // 初始化AI检测
-  initAiDetection();
 
-  // 在页面关闭/刷新时尝试让后端把用户从房间移除
-  function handleBeforeUnload(e) {
-    try {
-      const roomId = route.params.id;
-      const token = getToken();
-      if (!roomId) return;
+  // init signaling (websocket + webRTC)
+  const roomId = route.params.id;
+  const userId = localStorage.getItem('user_id');
+  connectRoom(roomId, userId, { onError: (e) => console.error(e) });
 
-      // 停止本地轮询与摄像头
-      if (roomInfoTimer.value) {
-        clearInterval(roomInfoTimer.value);
-        roomInfoTimer.value = null;
-      }
-      stopCamera();
-      if (ws.value) try { ws.value.close(); } catch (err) {}
-      cleanupPeerConnections();
+  timer.value = setInterval(() => { currentTime.value = Date.now(); }, 1000);
 
-      // 尝试使用 fetch keepalive 发送退出请求（sendBeacon 无法携带 Authorization header）
-      const payload = JSON.stringify({ room_id: roomId });
-      if (token && navigator && navigator.sendBeacon === undefined) {
-        // 如果没有 sendBeacon，则仍尝试 fetch keepalive
-        try {
-          fetch('/api/room/leave', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`,
-            },
-            body: payload,
-            keepalive: true,
-          });
-        } catch (err) {
-          // 忽略错误
-        }
-      } else {
-        try {
-          fetch('/api/room/leave', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`,
-            },
-            body: payload,
-            keepalive: true,
-          });
-        } catch (err) {
-          // 忽略
-        }
-      }
-    } catch (err) {
-      // ignore
-    }
-  }
+  // start polling with callback
+  startPolling(route.params.id, 5000, () => {
+    ui.showToast('房间已关闭，返回房间列表');
+    stopCamera();
+    closeRoom();
+    cleanupPeerConnections();
+    router.push('/study-room');
+  });
 
+  ai.start();
   window.addEventListener('beforeunload', handleBeforeUnload);
 });
 
-// 组件卸载时清理资源
 onUnmounted(() => {
-  if (timer.value) {
-    clearInterval(timer.value);
-  }
-  if (aiDetectionTimer.value) {
-    clearInterval(aiDetectionTimer.value);
-  }
-  
-  // 关闭WebSocket连接
-  if (ws.value) {
-    ws.value.close();
-  }
-  
-  // 清理PeerConnections
+  if (timer.value) clearInterval(timer.value);
+  ai.stop();
+  closeRoom();
   cleanupPeerConnections();
-  
-  // 停止房间信息轮询
-  if (roomInfoTimer.value) {
-    clearInterval(roomInfoTimer.value);
-    roomInfoTimer.value = null;
-  }
-
-  // 移除 beforeunload 监听
-  try {
-    window.removeEventListener('beforeunload', handleBeforeUnload);
-  } catch (err) {}
-
-  // 停止摄像头
+  stopPolling();
+  try { window.removeEventListener('beforeunload', handleBeforeUnload); } catch (err) {}
   stopCamera();
 });
 </script>
@@ -786,7 +291,7 @@ onUnmounted(() => {
           </select>
         </div>
       </div>
-      
+
       <!-- 多人视频网格 -->
       <div class="video-grid" :class="videoGridClass" v-if="videoVisible">
         <!-- 本地视频 -->
@@ -794,41 +299,41 @@ onUnmounted(() => {
           <div class="video-header">
             <span>我</span>
           </div>
-          <video 
-            ref="videoRef" 
-            class="camera-video" 
-            autoplay 
-            playsinline 
+          <video
+            ref="videoRef"
+            class="camera-video"
+            autoplay
+            playsinline
             :style="{ display: privacyMode === 'off' ? 'block' : 'none' }"
           ></video>
-          <canvas 
-            ref="canvasRef" 
-            class="camera-canvas" 
+          <canvas
+            ref="canvasRef"
+            class="camera-canvas"
             v-if="privacyMode !== 'off'"
           ></canvas>
           <div class="camera-loading" v-if="cameraLoading">
             <p>正在启动摄像头...</p>
           </div>
         </div>
-        
+
         <!-- 远程视频 -->
-        <div 
-          v-for="(stream, userId) in videoStreams" 
-          :key="userId" 
+        <div
+          v-for="(stream, userId) in videoStreams"
+          :key="userId"
           class="video-item"
         >
           <div class="video-header">
             <span>{{ userInfoMap.get(userId)?.nickname || userId }}</span>
           </div>
-          <video 
-            :ref="el => { if (el) el.srcObject = stream }" 
-            class="remote-video" 
-            autoplay 
-            playsinline 
+          <video
+            :ref="el => { if (el) el.srcObject = stream }"
+            class="remote-video"
+            autoplay
+            playsinline
           ></video>
         </div>
       </div>
-      
+
       <div class="camera-off" v-if="!cameraError && !videoVisible">
         <p>视频已隐藏（摄像头仍在运行）</p>
       </div>
@@ -841,7 +346,7 @@ onUnmounted(() => {
     <div class="card">
       <p class="muted">当前为 MVP：只验证创建/加入/退出链路与状态机。</p>
       <button class="danger" type="button" :disabled="leaveLoading" @click="onLeave">
-        {{ leaveLoading ? "退出中…" : "退出房间" }}
+        {{ leaveLoading ? '退出中…' : '退出房间' }}
       </button>
     </div>
 
@@ -861,12 +366,8 @@ onUnmounted(() => {
           </label>
         </div>
         <div class="dialog-actions">
-          <button type="button" class="secondary" @click="closeThemeDialog">
-            取消
-          </button>
-          <button type="button" class="primary" :disabled="updatingTheme" @click="updateTheme">
-            {{ updatingTheme ? "修改中..." : "修改" }}
-          </button>
+          <button type="button" class="secondary" @click="closeThemeDialog">取消</button>
+          <button type="button" class="primary" :disabled="updatingTheme" @click="updateTheme">{{ updatingTheme ? '修改中...' : '修改' }}</button>
         </div>
       </div>
     </div>
@@ -879,16 +380,12 @@ onUnmounted(() => {
           <p>确定要销毁这个房间吗？这将会把所有成员强制退出。</p>
         </div>
         <div class="dialog-actions">
-          <button type="button" class="secondary" @click="closeDestroyDialog">
-            取消
-          </button>
-          <button type="button" class="danger" :disabled="destroying" @click="destroyRoom">
-            {{ destroying ? "销毁中..." : "销毁" }}
-          </button>
+          <button type="button" class="secondary" @click="closeDestroyDialog">取消</button>
+          <button type="button" class="danger" :disabled="destroying" @click="destroyRoom">{{ destroying ? '销毁中...' : '销毁' }}</button>
         </div>
       </div>
     </div>
-    
+
     <!-- 学习时长弹窗 -->
     <div v-if="showDurationDialog" class="dialog-overlay">
       <div class="dialog">

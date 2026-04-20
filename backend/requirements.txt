@@ -12,6 +12,8 @@ passlib[bcrypt]
 python-dotenv
 opencv-python>=4.8.0
 numpy>=1.24.0
-torch>=2.0.0
-torchvision>=0.15.0
-pillow>=10.0.0
+# 上述机器学习相关包（torch/torchvision/pillow）在当前后端实现中为可选。
+# ai_service.py 目前使用 OpenCV Haar 级联与 numpy；如需深度学习模型请手动添加下面的包：
+# torch>=2.0.0
+# torchvision>=0.15.0
+# pillow>=10.0.0

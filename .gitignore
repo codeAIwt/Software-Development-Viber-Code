@@ -186,6 +186,21 @@ test-results/
 .coverage.*
 htmlcov/
 
+# Integration test files
+integration_test.py
+integration_test_report.md
+
+# Performance test files
+performance_test.py
+run_performance_test.py
+performance_test_report.md
+performance_results_*.csv
+
+# Stress test files
+stress_test.py
+stress_test_report.md
+locust_report.html
+
 # Temporary files
 *.tmp
 *.temp

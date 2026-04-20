@@ -146,3 +146,57 @@ def release_room_leave_lock(room_id: str) -> None:
         r.delete(lock_room_leave_key(room_id))
     except Exception:
         return
+
+
+# --- 高层封装：自习室相关键与常用操作（减少业务层对 Redis 命令与键名的直接依赖）
+def room_users_all_key(room_id: str) -> str:
+    """历史/所有成员集合键。"""
+    return f"room:users:{room_id}"
+
+
+def room_users_active_key(room_id: str) -> str:
+    """活跃成员集合键（等价于 leave_time IS NULL）。"""
+    return f"room:active_users:{room_id}"
+
+
+def user_join_time_key(room_id: str, user_id: str) -> str:
+    return f"room:join_time:{room_id}:{user_id}"
+
+
+def user_leave_time_key(room_id: str, user_id: str) -> str:
+    return f"room:leave_time:{room_id}:{user_id}"
+
+
+def user_study_duration_key(room_id: str, user_id: str) -> str:
+    return f"room:study_duration:{room_id}:{user_id}"
+
+
+def get_room_meta(room_id: str) -> dict | None:
+    """Fetch room meta hash; return None when missing."""
+    r = _redis()
+    meta = r.hgetall(room_meta_key(room_id))
+    if not meta:
+        return None
+    return meta
+
+
+def get_idle_rooms(theme: str, start: int = 0, end: int = -1) -> list:
+    """Return room ids from idle zset (most-recent first)."""
+    r = _redis()
+    return r.zrevrange(rooms_idle_zset_key(theme), start, end)
+
+
+def is_user_active_in_room(room_id: str, user_id: str) -> bool:
+    r = _redis()
+    return r.sismember(room_users_active_key(room_id), user_id)
+
+
+def get_room_active_members(room_id: str) -> set:
+    r = _redis()
+    return r.smembers(room_users_active_key(room_id))
+
+
+def get_room_all_members(room_id: str) -> set:
+    r = _redis()
+    return r.smembers(room_users_all_key(room_id))
+

@@ -8,6 +8,9 @@ from config.db import init_db
 from controllers.room_controller import router as room_router
 from controllers.user_controller import router as user_router
 from controllers.duration_controller import router as duration_router
+from services import room_service
+from config.db import SessionLocal
+from starlette.concurrency import run_in_threadpool
 
 
 @asynccontextmanager
@@ -103,6 +106,17 @@ def create_app() -> FastAPI:
                         )
         except WebSocketDisconnect:
             manager.disconnect(room_id, user_id)
+            # 尝试在服务器端将该用户从房间中移除（清理 Redis / 持久化学习时长）
+            try:
+                db = SessionLocal()
+                try:
+                    # room_service.leave_room 是同步阻塞函数，在线程池中执行
+                    await run_in_threadpool(room_service.leave_room, db, user_id, room_id)
+                finally:
+                    db.close()
+            except Exception as e:
+                print(f"Error during websocket disconnect cleanup: {e}")
+
             # 通知房间内其他用户有用户离开
             await manager.broadcast(room_id, {
                 "type": "user_leave",

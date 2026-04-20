@@ -47,53 +47,13 @@ def _now_ms() -> int:
     return int(now.timestamp() * 1000)
 
 
-def _room_users_all_key(room_id: str) -> str:
-    # 仅用于防止重复进入同一房间（历史成员也算重复）。
-    return f"room:users:{room_id}"
-
-
-def _room_users_active_key(room_id: str) -> str:
-    # 用于判断“活跃成员”：leave_time IS NULL 的等价状态。
-    return f"room:active_users:{room_id}"
-
-
-def _user_join_time_key(room_id: str, user_id: str) -> str:
-    # 记录用户加入房间的时间
-    return f"room:join_time:{room_id}:{user_id}"
-
-
-def _user_leave_time_key(room_id: str, user_id: str) -> str:
-    # 记录用户离开房间的时间
-    return f"room:leave_time:{room_id}:{user_id}"
-
-
-def _user_study_duration_key(room_id: str, user_id: str) -> str:
-    # 记录用户在房间中的学习时长（毫秒）
-    return f"room:study_duration:{room_id}:{user_id}"
-
-
-def _read_room_meta(r, room_id: str) -> dict | None:
-    meta = r.hgetall(cache.room_meta_key(room_id))
-    if not meta:
-        return None
-    # redis 返回全是 str；后续转类型
-    return meta
-
-
-def _check_user_in_any_room(r, user_id: str) -> str | None:
-    """
-    检查用户是否在任何房间中
-    返回用户所在的房间ID，如果不在任何房间中返回None
-    """
-    # 遍历所有主题，检查用户是否在任何房间中
+def _check_user_in_any_room(user_id: str) -> str | None:
+    """检查用户是否在任何房间中，返回所在房间ID或 None。"""
     themes = ["考研", "期末", "考公", "语言"]
     for theme in themes:
-        # 获取该主题下的所有房间
-        room_ids = r.zrevrange(cache.rooms_idle_zset_key(theme), 0, -1)
+        room_ids = cache.get_idle_rooms(theme, 0, -1)
         for room_id in room_ids:
-            # 检查用户是否在该房间的活跃成员中
-            active_key = _room_users_active_key(room_id)
-            if r.sismember(active_key, user_id):
+            if cache.is_user_active_in_room(room_id, user_id):
                 return room_id
     return None
 
@@ -106,7 +66,7 @@ def create_room(db: Session, creator_user_id: str, theme: str, max_people: int, 
     
     # 检查用户是否已经在其他房间中
     r = cache._redis()
-    existing_room = _check_user_in_any_room(r, creator_user_id)
+    existing_room = _check_user_in_any_room(creator_user_id)
     if existing_room:
         raise RoomServiceError(400, "需要退出当前自习室才能创建新自习室", {"existing_room_id": existing_room})
 
@@ -122,8 +82,8 @@ def create_room(db: Session, creator_user_id: str, theme: str, max_people: int, 
 
     status = "full" if max_people == 1 else "idle"
     meta_key = cache.room_meta_key(room_id)
-    all_key = _room_users_all_key(room_id)
-    active_key = _room_users_active_key(room_id)
+    all_key = cache.room_users_all_key(room_id)
+    active_key = cache.room_users_active_key(room_id)
     idle_zset_key = cache.rooms_idle_zset_key(theme)
 
     pipe = r.pipeline()
@@ -143,7 +103,7 @@ def create_room(db: Session, creator_user_id: str, theme: str, max_people: int, 
     pipe.sadd(all_key, creator_user_id)
     pipe.sadd(active_key, creator_user_id)
     # 记录创建者的加入时间
-    pipe.set(_user_join_time_key(room_id, creator_user_id), str(now_ms))
+    pipe.set(cache.user_join_time_key(room_id, creator_user_id), str(now_ms))
     if status == "idle":
         pipe.zadd(idle_zset_key, {room_id: now_ms})
     else:
@@ -213,11 +173,11 @@ def list_idle_rooms(db: Session, viewer_user_id: str, theme: str | None) -> dict
     seen: set[str] = set()
 
     def add_from_theme(t: str) -> None:
-        ids = r.zrevrange(cache.rooms_idle_zset_key(t), 0, LIST_ROOMS_LIMIT_PER_THEME - 1)
+        ids = cache.get_idle_rooms(t, 0, LIST_ROOMS_LIMIT_PER_THEME - 1)
         for rid in ids:
             if rid in seen:
                 continue
-            meta = r.hgetall(cache.room_meta_key(rid))
+            meta = cache.get_room_meta(rid)
             if not meta:
                 continue
             if meta.get("status") != "idle":
@@ -247,11 +207,11 @@ def list_idle_rooms(db: Session, viewer_user_id: str, theme: str | None) -> dict
         for t in themes:
             # 这里简化处理，实际项目中可能需要更高效的方式
             # 例如使用一个单独的集合存储用户创建的房间ID
-            ids = r.zrevrange(cache.rooms_idle_zset_key(t), 0, -1)
+            ids = cache.get_idle_rooms(t, 0, -1)
             for rid in ids:
                 if rid in seen:
                     continue
-                meta = r.hgetall(cache.room_meta_key(rid))
+                meta = cache.get_room_meta(rid)
                 if not meta:
                     continue
                 # 检查是否是用户创建的房间
@@ -288,11 +248,11 @@ def list_idle_rooms(db: Session, viewer_user_id: str, theme: str | None) -> dict
     else:
         add_from_theme(theme)
         # 添加用户自己创建的该主题的房间
-        ids = r.zrevrange(cache.rooms_idle_zset_key(theme), 0, -1)
+        ids = cache.get_idle_rooms(theme, 0, -1)
         for rid in ids:
             if rid in seen:
                 continue
-            meta = r.hgetall(cache.room_meta_key(rid))
+            meta = cache.get_room_meta(rid)
             if not meta:
                 continue
             if meta.get("creator_id") == viewer_user_id:
@@ -324,7 +284,7 @@ def join_room(db: Session, user_id: str, room_id: str, match_type: MatchType) ->
     now_ms = _now_ms()
     
     # 检查用户是否已经在其他房间中
-    existing_room = _check_user_in_any_room(r, user_id)
+    existing_room = _check_user_in_any_room(user_id)
     if existing_room and existing_room != room_id:
         raise RoomServiceError(400, "需要退出当前自习室才能加入新自习室", {"existing_room_id": existing_room})
 
@@ -332,7 +292,7 @@ def join_room(db: Session, user_id: str, room_id: str, match_type: MatchType) ->
         raise RoomServiceError(409, "加入房间超时", {"match_fail_reason": "timeout"})
 
     try:
-        meta = _read_room_meta(r, room_id)
+        meta = cache.get_room_meta(room_id)
         if not meta:
             raise RoomServiceError(404, "房间不存在", {"match_fail_reason": "no_room"})
 
@@ -343,8 +303,8 @@ def join_room(db: Session, user_id: str, room_id: str, match_type: MatchType) ->
         theme = meta.get("theme")
         max_people = int(meta.get("max_people", "0"))
 
-        all_key = _room_users_all_key(room_id)
-        active_key = _room_users_active_key(room_id)
+        all_key = cache.room_users_all_key(room_id)
+        active_key = cache.room_users_active_key(room_id)
         idle_zset_key = cache.rooms_idle_zset_key(theme)
 
         # 检查用户是否已经在房间中
@@ -370,9 +330,9 @@ def join_room(db: Session, user_id: str, room_id: str, match_type: MatchType) ->
             pipe = r.pipeline()
             pipe.sadd(active_key, user_id)
             # 记录加入时间
-            pipe.set(_user_join_time_key(room_id, user_id), str(now_ms))
+            pipe.set(cache.user_join_time_key(room_id, user_id), str(now_ms))
             # 清除上次的离开时间
-            pipe.delete(_user_leave_time_key(room_id, user_id))
+            pipe.delete(cache.user_leave_time_key(room_id, user_id))
             pipe.hset(
                 cache.room_meta_key(room_id),
                 mapping={
@@ -406,7 +366,7 @@ def join_room(db: Session, user_id: str, room_id: str, match_type: MatchType) ->
             pipe.sadd(all_key, user_id)
             pipe.sadd(active_key, user_id)
             # 记录加入时间
-            pipe.set(_user_join_time_key(room_id, user_id), str(now_ms))
+            pipe.set(cache.user_join_time_key(room_id, user_id), str(now_ms))
             pipe.hset(
                 cache.room_meta_key(room_id),
                 mapping={
@@ -446,11 +406,10 @@ def leave_room(db: Session, user_id: str, room_id: str) -> dict:
         raise RoomServiceError(409, "leave timeout", {})
 
     try:
-        meta = _read_room_meta(r, room_id)
+        meta = cache.get_room_meta(room_id)
         if not meta:
             raise RoomServiceError(404, "房间不存在", {})
-
-        active_key = _room_users_active_key(room_id)
+        active_key = cache.room_users_active_key(room_id)
         if not r.sismember(active_key, user_id):
             raise RoomServiceError(403, "不在房间中", {})
 
@@ -462,7 +421,7 @@ def leave_room(db: Session, user_id: str, room_id: str) -> dict:
         new_status = "closed" if new_current == 0 else "idle"
 
         # 计算学习时长
-        join_time_str = r.get(_user_join_time_key(room_id, user_id))
+        join_time_str = r.get(cache.user_join_time_key(room_id, user_id))
         study_duration = 0
         if join_time_str:
             join_time = int(join_time_str)
@@ -474,22 +433,22 @@ def leave_room(db: Session, user_id: str, room_id: str) -> dict:
         pipe = r.pipeline()
         pipe.srem(active_key, user_id)
         # 记录离开时间
-        pipe.set(_user_leave_time_key(room_id, user_id), str(now_ms))
+        pipe.set(cache.user_leave_time_key(room_id, user_id), str(now_ms))
         # 记录学习时长
-        pipe.set(_user_study_duration_key(room_id, user_id), str(study_duration))
+        pipe.set(cache.user_study_duration_key(room_id, user_id), str(study_duration))
         
         if new_status == "closed":
             # 当房间关闭时，删除房间的所有相关信息
             pipe.delete(cache.room_meta_key(room_id))
-            pipe.delete(_room_users_all_key(room_id))
+            pipe.delete(cache.room_users_all_key(room_id))
             pipe.delete(active_key)
             pipe.zrem(idle_zset_key, room_id)
             # 删除所有用户的加入时间、离开时间和学习时长
-            users = r.smembers(_room_users_all_key(room_id))
+            users = r.smembers(cache.room_users_all_key(room_id))
             for u in users:
-                pipe.delete(_user_join_time_key(room_id, u))
-                pipe.delete(_user_leave_time_key(room_id, u))
-                pipe.delete(_user_study_duration_key(room_id, u))
+                pipe.delete(cache.user_join_time_key(room_id, u))
+                pipe.delete(cache.user_leave_time_key(room_id, u))
+                pipe.delete(cache.user_study_duration_key(room_id, u))
         else:
             # 否则更新房间信息
             pipe.hset(
@@ -556,7 +515,7 @@ def leave_room(db: Session, user_id: str, room_id: str) -> dict:
 
 def get_room_info(db: Session, room_id: str) -> dict:
     r = cache._redis()
-    meta = r.hgetall(cache.room_meta_key(room_id))
+    meta = cache.get_room_meta(room_id)
     if not meta:
         raise RoomServiceError(404, "房间不存在", {})
     
@@ -567,7 +526,7 @@ def get_room_info(db: Session, room_id: str) -> dict:
     tags = [tag for tag in tags if tag]
     
     # 获取房间内的所有用户
-    active_key = _room_users_active_key(room_id)
+    active_key = cache.room_users_active_key(room_id)
     users = r.smembers(active_key)
     
     return {
@@ -584,7 +543,7 @@ def get_room_info(db: Session, room_id: str) -> dict:
 
 def update_room_info(db: Session, user_id: str, room_id: str, theme: str = None) -> dict:
     r = cache._redis()
-    meta = _read_room_meta(r, room_id)
+    meta = cache.get_room_meta(room_id)
     if not meta:
         raise RoomServiceError(404, "房间不存在", {})
     
@@ -613,7 +572,7 @@ def update_room_info(db: Session, user_id: str, room_id: str, theme: str = None)
 
 def destroy_room(db: Session, user_id: str, room_id: str) -> dict:
     r = cache._redis()
-    meta = _read_room_meta(r, room_id)
+    meta = cache.get_room_meta(room_id)
     if not meta:
         raise RoomServiceError(404, "房间不存在", {})
     
@@ -622,7 +581,7 @@ def destroy_room(db: Session, user_id: str, room_id: str) -> dict:
         raise RoomServiceError(403, "只有创建者可以销毁房间", {})
     
     # 获取房间内的所有用户
-    active_key = _room_users_active_key(room_id)
+    active_key = cache.room_users_active_key(room_id)
     users = r.smembers(active_key)
     
     now_ms = _now_ms()
@@ -631,12 +590,12 @@ def destroy_room(db: Session, user_id: str, room_id: str) -> dict:
     # 强制所有用户离开房间
     for user in users:
         # 记录离开时间和学习时长
-        join_time_str = r.get(_user_join_time_key(room_id, user))
+        join_time_str = r.get(cache.user_join_time_key(room_id, user))
         if join_time_str:
             join_time = int(join_time_str)
             study_duration = now_ms - join_time
-            pipe.set(_user_leave_time_key(room_id, user), str(now_ms))
-            pipe.set(_user_study_duration_key(room_id, user), str(study_duration))
+            pipe.set(cache.user_leave_time_key(room_id, user), str(now_ms))
+            pipe.set(cache.user_study_duration_key(room_id, user), str(study_duration))
     
     # 移除所有用户
     pipe.srem(active_key, *users)

@@ -5,6 +5,7 @@ import * as studyRoomApi from "../api/studyRoom";
 import { useUiStore } from "../store";
 import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import { startCamera, stopCamera, checkCameraPermission } from "../utils/video";
+import { getToken } from "../utils/auth";
 import * as userApi from "../api/user";
 
 const route = useRoute();
@@ -95,6 +96,8 @@ const loadingCreatorInfo = ref(false);
 const joinTime = ref(Date.now());
 const currentTime = ref(Date.now());
 const timer = ref(null);
+// 房间信息轮询定时器 id
+const roomInfoTimer = ref(null);
 
 // 计算属性
 const roomDuration = computed(() => {
@@ -146,8 +149,26 @@ async function getUserInfo(userId) {
 // 获取房间信息
 async function fetchRoomInfo() {
   try {
-    const { data } = await studyRoomApi.getRoomInfo(route.params.id);
+    // 若路由中无房间 ID，则不再请求（防止在路由变更后继续请求 undefined）
+    const roomId = route.params.id;
+    if (!roomId) return;
+
+    const { data } = await studyRoomApi.getRoomInfo(roomId);
     if (data.code === 200) {
+      // 如果后端表示房间已关闭，停止轮询并返回房间列表
+      if (data.data?.status === 'closed') {
+        if (roomInfoTimer.value) {
+          clearInterval(roomInfoTimer.value);
+          roomInfoTimer.value = null;
+        }
+        ui.showToast('房间已关闭，返回房间列表');
+        stopCamera();
+        if (ws.value) try { ws.value.close(); } catch (err) {}
+        cleanupPeerConnections();
+        router.push('/study-room');
+        return;
+      }
+
       roomInfo.value = data.data;
       // 获取创建者信息
       if (roomInfo.value.creator_id) {
@@ -158,7 +179,7 @@ async function fetchRoomInfo() {
         }
         loadingCreatorInfo.value = false;
       }
-      
+
       // 获取房间内所有用户的信息
       if (roomInfo.value.users && roomInfo.value.users.length > 0) {
         loadingUserInfo.value = true;
@@ -169,6 +190,20 @@ async function fetchRoomInfo() {
       }
     }
   } catch (e) {
+    const status = e.response?.status;
+    // 房间不存在或已被删除（404），停止轮询并跳回房间列表
+    if (status === 404) {
+      if (roomInfoTimer.value) {
+        clearInterval(roomInfoTimer.value);
+        roomInfoTimer.value = null;
+      }
+      ui.showToast('房间不存在或已关闭，返回房间列表');
+      stopCamera();
+      if (ws.value) try { ws.value.close(); } catch (err) {}
+      cleanupPeerConnections();
+      router.push('/study-room');
+      return;
+    }
     console.error('获取房间信息失败:', e);
   }
 }
@@ -472,9 +507,15 @@ async function onLeave() {
   const roomId = route.params.id;
   leaveLoading.value = true;
   try {
+    // 先停止房间信息轮询，避免在后端处理退出时继续请求旧房间信息
+    if (roomInfoTimer.value) {
+      clearInterval(roomInfoTimer.value);
+      roomInfoTimer.value = null;
+    }
+
     // 先停止摄像头
     stopCamera();
-    
+
     const { data } = await studyRoomApi.leaveRoom(roomId);
     if (data.code !== 200) {
       ui.showToast(data.msg || "退出失败");
@@ -545,6 +586,12 @@ function closeDestroyDialog() {
 async function destroyRoom() {
   destroying.value = true;
   try {
+    // 停止轮询，避免销毁期间继续请求老房间信息
+    if (roomInfoTimer.value) {
+      clearInterval(roomInfoTimer.value);
+      roomInfoTimer.value = null;
+    }
+
     const { data } = await studyRoomApi.destroyRoom(route.params.id);
     if (data.code === 200) {
       stopCamera();
@@ -587,12 +634,67 @@ onMounted(async () => {
   }, 1000);
   
   // 定期刷新房间信息，以获取最新的用户列表
-  setInterval(async () => {
+  roomInfoTimer.value = setInterval(async () => {
     await fetchRoomInfo();
   }, 5000); // 每5秒刷新一次
   
   // 初始化AI检测
   initAiDetection();
+
+  // 在页面关闭/刷新时尝试让后端把用户从房间移除
+  function handleBeforeUnload(e) {
+    try {
+      const roomId = route.params.id;
+      const token = getToken();
+      if (!roomId) return;
+
+      // 停止本地轮询与摄像头
+      if (roomInfoTimer.value) {
+        clearInterval(roomInfoTimer.value);
+        roomInfoTimer.value = null;
+      }
+      stopCamera();
+      if (ws.value) try { ws.value.close(); } catch (err) {}
+      cleanupPeerConnections();
+
+      // 尝试使用 fetch keepalive 发送退出请求（sendBeacon 无法携带 Authorization header）
+      const payload = JSON.stringify({ room_id: roomId });
+      if (token && navigator && navigator.sendBeacon === undefined) {
+        // 如果没有 sendBeacon，则仍尝试 fetch keepalive
+        try {
+          fetch('/api/room/leave', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+            body: payload,
+            keepalive: true,
+          });
+        } catch (err) {
+          // 忽略错误
+        }
+      } else {
+        try {
+          fetch('/api/room/leave', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+            body: payload,
+            keepalive: true,
+          });
+        } catch (err) {
+          // 忽略
+        }
+      }
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  window.addEventListener('beforeunload', handleBeforeUnload);
 });
 
 // 组件卸载时清理资源
@@ -612,6 +714,17 @@ onUnmounted(() => {
   // 清理PeerConnections
   cleanupPeerConnections();
   
+  // 停止房间信息轮询
+  if (roomInfoTimer.value) {
+    clearInterval(roomInfoTimer.value);
+    roomInfoTimer.value = null;
+  }
+
+  // 移除 beforeunload 监听
+  try {
+    window.removeEventListener('beforeunload', handleBeforeUnload);
+  } catch (err) {}
+
   // 停止摄像头
   stopCamera();
 });

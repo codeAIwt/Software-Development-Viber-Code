@@ -177,3 +177,33 @@ backend/__pycache__/
 backend/*/__pycache__/
 dist/
 build/
+
+# Test scripts and reports
+scripts/run_*_tests.py
+test-summary.md
+*.test_results.xml
+test-results/
+.coverage.*
+htmlcov/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Logs
+logs/
+server.log
+
+# Redis dump
+dump.rdb
+
+# Security reports
+security_report.json
+bandit_report.json
+npm_audit_report.json
+
+# Performance reports
+performance-report.md
+*.perf.*

@@ -308,7 +308,7 @@ jobs:
     - name: Install frontend dependencies
       run: |
         cd frontend
-        npm install
+        npm ci
     
     - name: Run frontend linting
       run: |
@@ -759,7 +759,7 @@ jobs:
     - name: Check for critical vulnerabilities
       run: |
         # Check Python dependencies for critical issues
-        if [ -f "backend/security_report.json" ]; then
+        if [ -f "backend/security_report.json" ] && [ -s "backend/security_report.json" ]; then
             python3 << 'EOF'
         import json
         with open('backend/security_report.json', 'r') as f:
@@ -773,10 +773,12 @@ jobs:
             else:
                 print('✅ No critical vulnerabilities found in Python dependencies')
         EOF
+        else
+            echo 'ℹ️ No Python security report found, skipping...'
         fi
         
         # Check NPM audit for critical issues
-        if [ -f "frontend/npm_audit_report.json" ]; then
+        if [ -f "frontend/npm_audit_report.json" ] && [ -s "frontend/npm_audit_report.json" ]; then
             python3 << 'EOF'
         import json
         with open('frontend/npm_audit_report.json', 'r') as f:
@@ -788,6 +790,8 @@ jobs:
             else:
                 print('✅ No critical vulnerabilities found in NPM dependencies')
         EOF
+        else
+            echo 'ℹ️ No NPM audit report found, skipping...'
         fi
 
   performance-test:

@@ -1,21 +1,21 @@
 import cv2
 import numpy as np
-import torch
-import torchvision.transforms as transforms
-from torchvision.models import resnet18
-from PIL import Image
-import io
+# import torch
+# import torchvision.transforms as transforms
+# from torchvision.models import resnet18
+# from PIL import Image
+# import io
 
 # 加载预训练的ResNet-18模型
-model = resnet18(pretrained=True)
-model.eval()  # 设置为评估模式
+# model = resnet18(pretrained=True)
+# model.eval()  # 设置为评估模式
 
-# 图像预处理变换
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-])
+# # 图像预处理变换
+# transform = transforms.Compose([
+#     transforms.Resize((224, 224)),
+#     transforms.ToTensor(),
+#     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+# ])
 
 def detect_person(image_data):
     """

@@ -319,7 +319,7 @@ jobs:
     - name: Build frontend for production
       run: |
         cd frontend
-        npm run build
+        npx vite build
         echo '✅ Frontend build completed successfully'
     
     - name: Verify build output
@@ -833,7 +833,7 @@ jobs:
       run: |
         cd frontend
         npm install -g webpack-bundle-analyzer
-        npm run build
+        npx vite build
         ls -la dist/assets/
         echo '✅ Frontend bundle analysis completed'
     

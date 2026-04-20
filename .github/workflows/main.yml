@@ -306,6 +306,7 @@ jobs:
     - name: Install frontend dependencies
       run: |
         cd frontend
+        export NODE_ENV=development
         npm install --include=dev
         ls -la node_modules/.bin/ | head -20
     
@@ -831,7 +832,9 @@ jobs:
     - name: Run frontend bundle analysis
       run: |
         cd frontend
+        export NODE_ENV=development
         npm install -g webpack-bundle-analyzer
+        npm install --include=dev
         npm run build
         ls -la dist/assets/
         echo '✅ Frontend bundle analysis completed'

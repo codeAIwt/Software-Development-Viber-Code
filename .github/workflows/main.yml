@@ -308,7 +308,7 @@ jobs:
     - name: Install frontend dependencies
       run: |
         cd frontend
-        npm ci
+        npm install --prefer-offline
     
     - name: Run frontend linting
       run: |
@@ -319,7 +319,7 @@ jobs:
     - name: Build frontend for production
       run: |
         cd frontend
-        npx vite build
+        npm run build
         echo '✅ Frontend build completed successfully'
     
     - name: Verify build output
@@ -833,7 +833,7 @@ jobs:
       run: |
         cd frontend
         npm install -g webpack-bundle-analyzer
-        npx vite build
+        npm run build
         ls -la dist/assets/
         echo '✅ Frontend bundle analysis completed'
     

@@ -327,7 +327,7 @@ jobs:
         cd frontend
         ls -la dist/
         # Check if essential files exist
-        if [ -f "dist/index.html" ] && [ -f "dist/assets/index-*.js" ]; then
+        if [ -f "dist/index.html" ] && [ -d "dist/assets" ] && [ "$(ls -A dist/assets/*.js 2>/dev/null)" ]; then
             echo '✅ Build output structure verification passed'
         else
             echo '❌ Build output structure verification failed'

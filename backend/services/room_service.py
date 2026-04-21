@@ -410,7 +410,8 @@ def leave_room(db: Session, user_id: str, room_id: str) -> dict:
     try:
         meta = cache.get_room_meta(room_id)
         if not meta:
-            raise RoomServiceError(404, "房间不存在", {})
+            print(f"[room_service.leave_room] room {room_id} does not exist, returning early")
+            return {"room_id": room_id, "study_duration": 0}
         active_key = cache.room_users_active_key(room_id)
         try:
             is_active = r.sismember(active_key, user_id)
@@ -419,7 +420,8 @@ def leave_room(db: Session, user_id: str, room_id: str) -> dict:
             is_active = False
         print(f"[room_service.leave_room] is_active={is_active} for user_id={user_id}")
         if not is_active:
-            raise RoomServiceError(403, "不在房间中", {})
+            print(f"[room_service.leave_room] user {user_id} not in room {room_id}, returning early")
+            return {"room_id": room_id, "study_duration": 0}
 
         theme = meta.get("theme")
         idle_zset_key = cache.rooms_idle_zset_key(theme)

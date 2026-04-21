@@ -18,9 +18,10 @@ const ui = useUiStore();
 
 // UI state
 const leaveLoading = ref(false);
+const isLeaving = ref(false);
 const videoRef = ref(null);
 const canvasRef = ref(null);
-const privacyMode = ref('blur');
+const privacyMode = ref('off');
 const currentUserId = ref(localStorage.getItem('user_id'));
 const privacyModes = [
   { value: 'blur', label: '模糊模式' },
@@ -75,7 +76,7 @@ const { videoStreams, peerConnections, connectRoom, closeRoom, sendSignal, clean
 const ai = useAiDetection({
   videoRef,
   enabled: true,
-  intervalMs: 10000,
+  intervalMs: 63000,
   detectFn: studyRoomApi.detectPerson,
   roomIdGetter: () => route.params.id,
   userIdGetter: () => currentUserId.value,
@@ -118,9 +119,12 @@ function toggleVideo() { videoVisible.value = !videoVisible.value; }
 function changePrivacyMode(mode) { privacyMode.value = mode; applyPrivacyMode(); }
 
 async function onLeave() {
+  if (isLeaving.value) return;
+  isLeaving.value = true;
   const roomId = route.params.id;
   leaveLoading.value = true;
   try {
+    ai.stop();
     stopPolling();
     stopCamera();
     const res = await leaveRoom(roomId);
@@ -242,6 +246,7 @@ onMounted(async () => {
 
   // start polling with callback
   startPolling(route.params.id, 5000, () => {
+    if (isLeaving.value) return;
     ui.showToast('房间已关闭，返回房间列表');
     stopCamera();
     closeRoom();

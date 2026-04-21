@@ -18,6 +18,7 @@ from services import room_service
 from services.ai_service import detect_person
 from services.room_service import RoomServiceError
 from utils import auth as auth_utils
+from utils import cache
 
 router = APIRouter()
 
@@ -171,6 +172,10 @@ def detect_person_api(
         # 验证用户身份，只能检测自己的摄像头
         if body.user_id != user.id:
             return _json_err(403, 403, "无权检测其他用户", {})
+
+        # 验证用户是否在房间中
+        if not cache.is_user_active_in_room(body.room_id, user.id):
+            return _json_err(403, 403, "用户不在该房间中", {})
         
         # 处理Base64图像
         import base64

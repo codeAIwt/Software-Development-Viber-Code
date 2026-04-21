@@ -613,24 +613,28 @@ def destroy_room(db: Session, user_id: str, room_id: str) -> dict:
             pipe.set(cache.user_leave_time_key(room_id, user), str(now_ms))
             pipe.set(cache.user_study_duration_key(room_id, user), str(study_duration))
     
-    # 移除所有用户
+    # 移除所有活跃用户
     pipe.srem(active_key, *users)
-    
-    # 更新房间状态为closed
-    pipe.hset(
-        cache.room_meta_key(room_id),
-        mapping={
-            "current_people": "0",
-            "status": "closed",
-            "updated_ts_ms": str(now_ms),
-        },
-    )
-    
+
+    # 获取所有用户（包括已离开的）
+    all_users = r.smembers(cache.room_users_all_key(room_id))
+
+    # 删除房间meta，使其不可查询
+    pipe.delete(cache.room_meta_key(room_id))
+    pipe.delete(cache.room_users_all_key(room_id))
+    pipe.delete(active_key)
+
     # 从空闲房间列表中移除
     theme = meta.get("theme")
     idle_zset_key = cache.rooms_idle_zset_key(theme)
     pipe.zrem(idle_zset_key, room_id)
-    
+
+    # 删除所有用户的加入时间、离开时间和学习时长
+    for u in all_users:
+        pipe.delete(cache.user_join_time_key(room_id, u))
+        pipe.delete(cache.user_leave_time_key(room_id, u))
+        pipe.delete(cache.user_study_duration_key(room_id, u))
+
     pipe.execute()
     
     return {

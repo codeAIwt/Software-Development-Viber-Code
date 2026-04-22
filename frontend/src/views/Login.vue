@@ -91,28 +91,32 @@ async function onSubmit() {
   justify-content: center;
   min-height: 100vh;
   padding: 24px;
+  background: #f6f7fb;
 }
 .card {
   width: min(420px, 100%);
   background: #fff;
-  border-radius: 16px;
-  padding: 28px 28px 22px;
-  box-shadow: 0 18px 50px rgba(28, 37, 51, 0.08);
+  border-radius: 18px;
+  padding: 32px 30px 24px;
+  box-shadow: 0 24px 60px rgba(28, 37, 51, 0.1), 0 8px 20px rgba(28, 37, 51, 0.04);
   border: 1px solid #eceff5;
+  transition: box-shadow 0.3s ease;
 }
 h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
 }
 .subtitle {
-  margin: 8px 0 20px;
+  margin: 8px 0 24px;
   color: #6b7280;
   font-size: 14px;
 }
 .form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 label {
   display: flex;
@@ -120,34 +124,49 @@ label {
   gap: 6px;
   font-size: 13px;
   color: #374151;
+  font-weight: 500;
 }
 input {
-  padding: 10px 12px;
-  border-radius: 10px;
+  padding: 11px 14px;
+  border-radius: 12px;
   border: 1px solid #d7dbe4;
   background: #f9fafb;
+  transition: all 0.2s ease;
+  font-size: 15px;
 }
 input:focus {
   outline: none;
-  border-color: #3b5bfd;
+  border-color: #2d6a4f;
   background: #fff;
+  box-shadow: 0 0 0 3px rgba(45, 106, 79, 0.12);
 }
 .primary {
   margin-top: 6px;
-  padding: 11px 12px;
+  padding: 12px 14px;
   border: none;
-  border-radius: 10px;
-  background: linear-gradient(90deg, #4f6bff, #3b5bfd);
+  border-radius: 12px;
+  background: #2d6a4f;
   color: #fff;
   cursor: pointer;
   font-weight: 600;
+  font-size: 15px;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 14px rgba(45, 106, 79, 0.25);
+}
+.primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(45, 106, 79, 0.35);
+}
+.primary:active:not(:disabled) {
+  transform: translateY(0);
 }
 .primary:disabled {
-  opacity: 0.65;
+  opacity: 0.6;
   cursor: not-allowed;
+  box-shadow: none;
 }
 .footer {
-  margin: 18px 0 0;
+  margin: 20px 0 0;
   font-size: 14px;
   color: #6b7280;
   text-align: center;

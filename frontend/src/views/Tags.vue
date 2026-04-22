@@ -104,22 +104,24 @@ async function skipTags() {
 }
 
 .card {
-  width: min(500px, 100%);
+  width: min(520px, 100%);
   background: #fff;
-  border-radius: 16px;
-  padding: 32px 28px;
-  box-shadow: 0 18px 50px rgba(28, 37, 51, 0.08);
+  border-radius: 18px;
+  padding: 36px 32px;
+  box-shadow: 0 24px 60px rgba(28, 37, 51, 0.1), 0 8px 20px rgba(28, 37, 51, 0.04);
   border: 1px solid #eceff5;
 }
 
 h2 {
   margin: 0 0 8px;
-  font-size: 22px;
+  font-size: 24px;
   text-align: center;
+  font-weight: 700;
+  letter-spacing: -0.2px;
 }
 
 .subtitle {
-  margin: 0 0 24px;
+  margin: 0 0 28px;
   color: #6b7280;
   font-size: 14px;
   text-align: center;
@@ -129,7 +131,7 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: 24px;
+  margin-bottom: 28px;
 }
 
 .tag {
@@ -140,18 +142,20 @@ h2 {
   color: #374151;
   font-size: 14px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
 }
 
 .tag:hover {
-  border-color: #3b5bfd;
-  background: #eff6ff;
+  border-color: #2d6a4f;
+  background: #e8f5e9;
+  transform: translateY(-1px);
 }
 
 .tag.active {
-  border-color: #3b5bfd;
-  background: #3b5bfd;
+  border-color: #2d6a4f;
+  background: #2d6a4f;
   color: #fff;
+  box-shadow: 0 4px 12px rgba(45, 106, 79, 0.25);
 }
 
 .actions {
@@ -161,27 +165,49 @@ h2 {
 }
 
 .primary {
-  padding: 10px 24px;
+  padding: 11px 28px;
   border: none;
-  border-radius: 10px;
-  background: #3b5bfd;
+  border-radius: 12px;
+  background: #2d6a4f;
   color: #fff;
   cursor: pointer;
   font-weight: 600;
+  font-size: 15px;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 14px rgba(45, 106, 79, 0.25);
+}
+
+.primary:hover:not(:disabled) {
+  background: #1b4332;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(45, 106, 79, 0.35);
+}
+
+.primary:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .primary:disabled {
-  opacity: 0.65;
+  opacity: 0.6;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .secondary {
-  padding: 10px 24px;
+  padding: 11px 28px;
   border: 1px solid #d7dbe4;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #fff;
   color: #6b7280;
   cursor: pointer;
   font-weight: 600;
+  font-size: 15px;
+  transition: all 0.2s ease;
+}
+
+.secondary:hover {
+  border-color: #2d6a4f;
+  color: #2d6a4f;
+  background: #f1f8f4;
 }
 </style>

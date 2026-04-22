@@ -296,16 +296,16 @@ onUnmounted(() => {
     <div class="card">
       <h3>房间信息</h3>
       <div class="room-info">
-        <p><strong>主题：</strong>{{ roomInfo.theme }}</p>
-        <p><strong>人数：</strong>{{ roomInfo.current_people }}/{{ roomInfo.max_people }}</p>
-        <p><strong>状态：</strong>{{ roomInfo.status }}</p>
-        <p><strong>创建者：</strong>{{ loadingCreatorInfo ? '加载中...' : (creatorInfo?.nickname || '未知') }}</p>
-        <p><strong>创建时间：</strong>{{ createTimeStr }}</p>
-        <p><strong>房间持续时间：</strong>{{ roomDuration }}</p>
-        <p><strong>您的加入时间：</strong>{{ joinTimeStr }}</p>
-        <p><strong>您的学习时长：</strong>{{ userDuration }}</p>
+        <p class="info-theme"><strong>主题</strong><span>{{ roomInfo.theme }}</span></p>
+        <p class="info-stat"><strong>人数</strong><span>{{ roomInfo.current_people }}/{{ roomInfo.max_people }}</span></p>
+        <p class="info-stat"><strong>状态</strong><span>{{ roomInfo.status }}</span></p>
+        <p class="info-creator"><strong>创建者</strong><span>{{ loadingCreatorInfo ? '加载中...' : (creatorInfo?.nickname || '未知') }}</span></p>
+        <p class="info-time"><strong>创建时间</strong><span>{{ createTimeStr }}</span></p>
+        <p class="info-time"><strong>持续时间</strong><span>{{ roomDuration }}</span></p>
+        <p class="info-time"><strong>加入时间</strong><span>{{ joinTimeStr }}</span></p>
+        <p class="info-duration"><strong>学习时长</strong><span class="highlight">{{ userDuration }}</span></p>
         <!-- 显示房间内所有用户 -->
-        <p><strong>房间成员：</strong></p>
+        <p class="info-members"><strong>房间成员</strong></p>
         <div class="room-users">
           <span v-for="(userId, index) in roomInfo.users" :key="index" class="user-tag">
             {{ loadingUserInfo ? '加载中...' : (userInfoMap.get(userId)?.nickname || userId) }}
@@ -454,7 +454,7 @@ onUnmounted(() => {
   padding: 24px 18px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 .bar {
   display: flex;
@@ -463,6 +463,9 @@ onUnmounted(() => {
 }
 h2 {
   margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
 }
 h3 {
   margin: 0 0 12px 0;
@@ -472,56 +475,189 @@ h3 {
 .card {
   background: #fff;
   border: 1px solid #e6eaf2;
-  border-radius: 14px;
-  padding: 16px;
+  border-radius: 16px;
+  padding: 18px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  box-shadow: 0 2px 8px rgba(28, 37, 51, 0.03);
 }
 
 .room-info {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+.room-info > * {
+  margin: 0;
 }
 
-.room-tags {
+/* 主题大卡片 - 整行 */
+.info-theme {
+  grid-column: 1 / -1;
+  background: #e8f5e9;
+  color: #1b4332;
+  border-radius: 14px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.info-theme strong {
+  font-size: 13px;
+  opacity: 0.85;
+  font-weight: 500;
+}
+.info-theme span {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+/* 统计卡片 */
+.info-stat {
+  background: #fafbff;
+  border: 1px solid #eef1f7;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.info-stat strong {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+}
+.info-stat span {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1c2533;
+}
+
+/* 创建者卡片 */
+.info-creator {
+  background: #fff;
+  border: 1px solid #e6eaf2;
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.info-creator strong {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+}
+.info-creator span {
+  font-size: 14px;
+  color: #1c2533;
+  font-weight: 600;
+}
+
+/* 时间信息卡片 */
+.info-time {
+  background: #fff;
+  border: 1px solid #e6eaf2;
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.info-time strong {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+}
+.info-time span {
+  font-size: 14px;
+  color: #1c2533;
+  font-weight: 600;
+}
+
+/* 学习时长突出显示 */
+.info-duration {
+  grid-column: 1 / -1;
+  background: #fff3e0;
+  color: #1b4332;
+  border-radius: 14px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.info-duration strong {
+  font-size: 13px;
+  opacity: 0.85;
+  font-weight: 500;
+}
+.info-duration .highlight {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+/* 成员标签 */
+.info-members {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.info-members strong {
+  font-size: 13px;
+  color: #374151;
+  font-weight: 500;
+}
+
+/* 房间成员标签容器 */
+.room-users {
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 8px;
 }
 
-.room-tag {
-  padding: 4px 10px;
-  border: 1px solid #d7dbe4;
-  border-radius: 12px;
-  background: #f9fafb;
-  color: #6b7280;
-  font-size: 12px;
-}
-
-.room-users {
+/* 房间标签容器 */
+.room-tags {
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 4px;
-  margin-bottom: 8px;
 }
 
-.user-tag {
+/* 房间标签 */
+.room-tag {
   padding: 4px 10px;
-  border: 1px solid #3b82f6;
-  border-radius: 12px;
-  background: #eff6ff;
+  border: 1px solid #e3e7ef;
+  border-radius: 20px;
+  background: #f7f8fb;
+  color: #6b7280;
+  font-size: 12px;
+  transition: all 0.2s ease;
+}
+
+/* 成员标签 */
+.user-tag {
+  padding: 5px 12px;
+  border: 1px solid #2d6a4f;
+  border-radius: 20px;
+  background: #e8f5e9;
   color: #1d4ed8;
   font-size: 12px;
+  transition: all 0.2s ease;
+  font-weight: 500;
 }
 
+/* 创建者操作按钮 */
 .creator-actions {
+  grid-column: 1 / -1;
   display: flex;
   gap: 10px;
-  margin-top: 12px;
+  margin-top: 8px;
+  flex-wrap: wrap;
 }
 
 .dialog-overlay {
@@ -535,19 +671,22 @@ h3 {
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  backdrop-filter: blur(4px);
 }
 
 .dialog {
   background: #fff;
-  border-radius: 16px;
-  padding: 24px;
+  border-radius: 18px;
+  padding: 28px;
   width: min(500px, 90%);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
 }
 
 .dialog h3 {
-  margin: 0 0 16px;
+  margin: 0 0 18px;
   font-size: 18px;
   text-align: center;
+  font-weight: 700;
 }
 
 .dialog-content {
@@ -566,13 +705,22 @@ h3 {
   gap: 6px;
   font-size: 13px;
   color: #374151;
+  font-weight: 500;
 }
 
 .control select {
-  padding: 10px 12px;
+  padding: 10px 14px;
   border-radius: 10px;
   border: 1px solid #d7dbe4;
   background: #f9fafb;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.control select:focus {
+  outline: none;
+  border-color: #2d6a4f;
+  box-shadow: 0 0 0 3px rgba(45, 106, 79, 0.12);
 }
 
 .secondary {
@@ -583,21 +731,37 @@ h3 {
   color: #6b7280;
   cursor: pointer;
   font-weight: 600;
+  transition: all 0.2s ease;
+}
+.secondary:hover {
+  border-color: #2d6a4f;
+  color: #2d6a4f;
+  background: #f1f8f4;
 }
 
 .primary {
   padding: 10px 24px;
-  border: 1px solid #3b82f6;
+  border: 1px solid #2d6a4f;
   border-radius: 10px;
-  background: #3b82f6;
+  background: #2d6a4f;
   color: #fff;
   cursor: pointer;
   font-weight: 600;
+  transition: all 0.2s ease;
+  box-shadow: 0 3px 10px rgba(45, 106, 79, 0.2);
 }
-
+.primary:hover:not(:disabled) {
+  background: #1b4332;
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px rgba(45, 106, 79, 0.3);
+}
+.primary:active:not(:disabled) {
+  transform: translateY(0);
+}
 .primary:disabled {
-  opacity: 0.65;
+  opacity: 0.6;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .danger {
@@ -608,18 +772,29 @@ h3 {
   color: #fff;
   cursor: pointer;
   font-weight: 600;
+  transition: all 0.2s ease;
+  box-shadow: 0 3px 10px rgba(239, 68, 68, 0.2);
+}
+.danger:hover:not(:disabled) {
+  background: #dc2626;
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px rgba(239, 68, 68, 0.3);
+}
+.danger:active:not(:disabled) {
+  transform: translateY(0);
+}
+.danger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
-.danger:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-}
 .camera-container {
   position: relative;
   width: 100%;
   height: 300px;
   border: 1px solid #e6eaf2;
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   background-color: #f9fafb;
   display: flex;
@@ -639,6 +814,7 @@ h3 {
 .camera-off {
   text-align: center;
   color: #6b7280;
+  padding: 20px;
 }
 .camera-controls {
   display: flex;
@@ -659,10 +835,17 @@ h3 {
   border: 1px solid #d7dbe4;
   background: #f9fafb;
   font-size: 14px;
+  transition: all 0.2s ease;
+}
+.privacy-mode-selector select:focus {
+  outline: none;
+  border-color: #2d6a4f;
+  box-shadow: 0 0 0 3px rgba(45, 106, 79, 0.12);
 }
 .camera-error {
   text-align: center;
   color: #ef4444;
+  padding: 20px;
 }
 .camera-error p {
   margin-bottom: 10px;
@@ -673,10 +856,12 @@ h3 {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(255, 255, 255, 0.8);
+  background-color: rgba(255, 255, 255, 0.85);
   display: flex;
   align-items: center;
   justify-content: center;
+  font-weight: 500;
+  color: #6b7280;
 }
 
 /* 视频网格布局 */
@@ -716,17 +901,23 @@ h3 {
 .video-item {
   position: relative;
   border: 1px solid #e6eaf2;
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   background-color: #f9fafb;
   display: flex;
   flex-direction: column;
+  box-shadow: 0 2px 6px rgba(28, 37, 51, 0.04);
+  transition: box-shadow 0.2s ease;
+}
+
+.video-item:hover {
+  box-shadow: 0 4px 12px rgba(28, 37, 51, 0.08);
 }
 
 .video-header {
   background-color: rgba(0, 0, 0, 0.7);
   color: white;
-  padding: 4px 8px;
+  padding: 5px 10px;
   font-size: 12px;
   font-weight: 500;
   z-index: 1;
@@ -739,29 +930,6 @@ h3 {
   flex: 1;
 }
 
-.danger {
-  width: 100%;
-  border: 1px solid #ef4444;
-  background: #fff5f5;
-  color: #b91c1c;
-  border-radius: 10px;
-  padding: 10px 12px;
-  cursor: pointer;
-  font-weight: 700;
-}
-.primary {
-  border: 1px solid #3b82f6;
-  background: #eff6ff;
-  color: #1d4ed8;
-  border-radius: 10px;
-  padding: 8px 16px;
-  cursor: pointer;
-  font-weight: 600;
-}
-.danger:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-}
 p {
   margin: 0;
 }
@@ -771,9 +939,9 @@ p {
 }
 
 .duration-value {
-  font-size: 24px;
+  font-size: 28px;
   font-weight: 700;
-  color: #3b82f6;
+  color: #2d6a4f;
   text-align: center;
   margin: 16px 0;
 }

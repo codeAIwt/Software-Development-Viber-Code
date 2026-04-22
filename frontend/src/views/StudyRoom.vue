@@ -14,17 +14,22 @@ import StudyRoomList from "../components/StudyRoomList.vue";
 
 <style scoped>
 .wrap {
-  max-width: 900px;
+  max-width: 960px;
   margin: 0 auto;
-  padding: 24px 18px;
+  padding: 28px 20px 40px;
 }
 .bar {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e6eaf2;
 }
 h2 {
   margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
 }
 </style>

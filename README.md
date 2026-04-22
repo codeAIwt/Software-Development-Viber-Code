@@ -79,6 +79,7 @@ frontend/
 │   │   └── duration.js      # 学习时长相关API
 │   ├── components/     # 组件
 │   │   ├── StudyRoomList.vue # 自习室列表组件
+│   │   ├── PrivacyMode.vue  # 隐私模式组件
 │   │   └── CommonToast.vue   # 通用提示组件
 │   ├── views/          # 页面
 │   │   ├── StudyRoom.vue     # 自习室页面
@@ -87,8 +88,16 @@ frontend/
 │   │   ├── Login.vue         # 登录页面
 │   │   ├── Register.vue      # 注册页面
 │   │   ├── Personal.vue      # 个人中心页面
+│   │   ├── Rank.vue          # 排行榜页面
 │   │   └── Tags.vue          # 标签选择页面
-│   └── router/         # 路由
+│   ├── composables/   # 组合式函数
+│   │   ├── useAiDetection.js   # AI检测
+│   │   ├── useCamera.js        # 摄像头管理
+│   │   ├── useRoomData.js     # 房间数据
+│   │   ├── useRoomSignaling.js # 房间信令
+│   │   ├── useWebRTC.js       # WebRTC通信
+│   │   └── useWebSocket.js    # WebSocket通信
+│   ├── router/         # 路由
 └── dist/               # 构建输出
 ```
 
@@ -129,6 +138,75 @@ frontend/
 - ✅ 实时通信（WebSocket 状态同步）
 - ✅ 数据库支持（MySQL/SQLite 双数据库）
 - ✅ CI/CD 自动化测试（GitHub Actions）
+
+## 局域网运行配置
+
+如果需要在局域网内运行项目，让其他设备（如手机、平板）访问本机服务，需要修改以下配置中的 IP 地址。
+
+### 1. 修改前端配置
+
+编辑 `frontend/vite.config.js` 文件，将 IP 地址修改为本机在局域网中的 IP 地址：
+
+```javascript
+import { defineConfig } from "vite";
+import vue from "@vitejs/plugin-vue";
+
+export default defineConfig({
+  plugins: [vue()],
+  server: {
+    host: true,
+    port: 5173,
+    proxy: {
+      "/api": {
+        target: "http://[本机局域网IP]:8000",  // 修改为你的局域网IP
+        changeOrigin: true,
+      },
+      "/ws": {
+        target: "ws://[本机局域网IP]:8000",    // 修改为你的局域网IP
+        changeOrigin: true,
+        ws: true,
+      },
+    },
+  },
+});
+```
+
+### 2. 获取本机局域网 IP 地址
+
+**Windows PowerShell：**
+```powershell
+ipconfig
+```
+找到以太网适配器或无线局域网适配器的 IPv4 地址，例如 `192.168.1.100`
+
+**Linux/macOS：**
+```bash
+ifconfig | grep "inet "
+# 或
+hostname -I
+```
+
+### 3. 启动后端服务
+
+确保后端服务监听在局域网 IP 上：
+
+```bash
+cd backend
+uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
+### 4. 访问方式
+
+- **电脑浏览器访问**：`http://192.168.x.x:5173`
+- **手机/平板访问**：`http://192.168.x.x:5173`（确保在同一局域网下）
+
+### 5. 摄像头功能注意事项
+
+由于浏览器安全策略限制，摄像头功能需要在 HTTPS 环境或 localhost 下才能正常工作。如果使用局域网 IP 访问，浏览器可能会阻止摄像头访问。可以：
+
+1. 使用本机 `localhost` 或 `127.0.0.1` 访问
+2. 配置 HTTPS 证书（适用于生产环境）
+3. 在浏览器中为该私网地址启用摄像头权限（具体方法因浏览器而异）
 
 ## 快速开始
 

@@ -107,7 +107,7 @@ def calculate_beat_percent(db: Session, study_date: date) -> None:
         StudyDuration.total_minutes > 0
     ).scalar()
     
-    if effective_users == 0:
+    if effective_users <= 1:
         return
     
     # 获取所有用户的学习时长
@@ -126,8 +126,8 @@ def calculate_beat_percent(db: Session, study_date: date) -> None:
                 StudyDuration.total_minutes < record.total_minutes
             ).scalar()
             
-            # 计算击败百分比
-            beat_percent = (less_count / effective_users) * 100
+            # 计算击败百分比（排除自身，所以用 effective_users - 1）
+            beat_percent = (less_count / (effective_users - 1)) * 100
             # 四舍五入到两位小数
             record.beat_percent = round(beat_percent, 2)
     
@@ -221,7 +221,7 @@ def calculate_real_time_rank_list(db: Session, study_date: date, limit: int = 10
     # 计算有效用户数（学习时长>0）
     effective_users = len([r for r in records if r.total_minutes > 0])
     
-    if effective_users == 0:
+    if effective_users <= 1:
         return []
     
     # 实时计算每个用户的击败百分比
@@ -231,8 +231,8 @@ def calculate_real_time_rank_list(db: Session, study_date: date, limit: int = 10
             # 计算学习时长小于当前用户的人数
             less_count = len([r for r in records if r.total_minutes < record.total_minutes and r.total_minutes > 0])
             
-            # 计算击败百分比
-            beat_percent = (less_count / effective_users) * 100
+            # 计算击败百分比（排除自身，所以用 effective_users - 1）
+            beat_percent = (less_count / (effective_users - 1)) * 100
             # 四舍五入到两位小数
             beat_percent = round(beat_percent, 2)
             

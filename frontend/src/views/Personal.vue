@@ -193,8 +193,6 @@ async function saveTags() {
         </div>
       </div>
     </div>
-
-    <p v-else class="muted">加载中…</p>
   </div>
 </template>
 
@@ -212,13 +210,16 @@ async function saveTags() {
 }
 h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
 }
 .card {
   background: #fff;
   border: 1px solid #e6eaf2;
-  border-radius: 14px;
-  padding: 18px;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(28, 37, 51, 0.03);
 }
 .row {
   display: flex;
@@ -232,11 +233,12 @@ h2 {
   border-radius: 16px;
   background: #e8ebf3 center/cover no-repeat;
   border: 1px solid #e5e8f0;
+  box-shadow: 0 2px 6px rgba(28, 37, 51, 0.06);
 }
 .name {
   margin: 0 0 6px;
   font-size: 18px;
-  font-weight: 650;
+  font-weight: 700;
 }
 .muted {
   margin: 0;
@@ -252,6 +254,7 @@ h2 {
 label {
   font-size: 13px;
   color: #374151;
+  font-weight: 500;
 }
 .inline {
   display: flex;
@@ -260,21 +263,42 @@ label {
 }
 input {
   flex: 1;
-  padding: 10px 12px;
-  border-radius: 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
   border: 1px solid #d7dbe4;
+  background: #f9fafb;
+  transition: all 0.2s ease;
+  font-size: 15px;
+}
+input:focus {
+  outline: none;
+  border-color: #2d6a4f;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(45, 106, 79, 0.12);
 }
 .primary {
   border: none;
   border-radius: 10px;
-  padding: 10px 14px;
-  background: #3b5bfd;
+  padding: 10px 16px;
+  background: #2d6a4f;
   color: #fff;
   cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  box-shadow: 0 3px 10px rgba(45, 106, 79, 0.2);
+}
+.primary:hover:not(:disabled) {
+  background: #1b4332;
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px rgba(45, 106, 79, 0.3);
+}
+.primary:active:not(:disabled) {
+  transform: translateY(0);
 }
 .primary:disabled {
-  opacity: 0.65;
+  opacity: 0.6;
   cursor: not-allowed;
+  box-shadow: none;
 }
 .stats {
   margin: 10px 0 16px;
@@ -286,8 +310,15 @@ input {
   background: #fff5f5;
   color: #b91c1c;
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 10px 14px;
   cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+.danger:hover {
+  background: #fef2f2;
+  border-color: #dc2626;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.1);
 }
 
 /* 标签样式 */
@@ -299,14 +330,36 @@ input {
 }
 
 .tag {
-  padding: 6px 12px;
-  border: 1px solid #d7dbe4;
-  border-radius: 16px;
-  background: #f9fafb;
-  color: #374151;
+  padding: 5px 12px;
+  border: 1px solid #e3e7ef;
+  border-radius: 20px;
+  background: #f7f8fb;
+  color: #4b5565;
   font-size: 13px;
   display: inline-flex;
   align-items: center;
+  transition: all 0.2s ease;
+  font-weight: 500;
+}
+.tag:nth-child(4n+1) {
+  background: #e8f5e9;
+  border-color: #c8e6c9;
+  color: #2d6a4f;
+}
+.tag:nth-child(4n+2) {
+  background: #fff3e0;
+  border-color: #ffe0b2;
+  color: #e65100;
+}
+.tag:nth-child(4n+3) {
+  background: #fce4ec;
+  border-color: #f8bbd0;
+  color: #ad1457;
+}
+.tag:nth-child(4n+4) {
+  background: #e0f2f1;
+  border-color: #b2dfdb;
+  color: #00695c;
 }
 
 .add-tag {
@@ -321,11 +374,15 @@ input {
   align-items: center;
   justify-content: center;
   font-size: 16px;
+  border-radius: 50%;
+  transition: all 0.2s ease;
 }
 
 .add-tag:hover {
-  border-color: #3b5bfd;
-  color: #3b5bfd;
+  border-color: #2d6a4f;
+  border-style: solid;
+  color: #2d6a4f;
+  background: #e8f5e9;
 }
 
 /* 弹窗样式 */
@@ -340,21 +397,24 @@ input {
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  backdrop-filter: blur(4px);
 }
 
 .dialog {
   background: #fff;
-  border-radius: 16px;
-  padding: 24px;
+  border-radius: 18px;
+  padding: 28px;
   width: min(500px, 90%);
   max-height: 80vh;
   overflow-y: auto;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
 }
 
 .dialog h3 {
-  margin: 0 0 16px;
+  margin: 0 0 18px;
   font-size: 18px;
   text-align: center;
+  font-weight: 700;
 }
 
 .dialog-tags {
@@ -364,17 +424,17 @@ input {
 .dialog-tags .tag {
   padding: 8px 16px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
 }
 
 .dialog-tags .tag:hover {
-  border-color: #3b5bfd;
-  background: #eff6ff;
+  border-color: #2d6a4f;
+  background: #e8f5e9;
 }
 
 .dialog-tags .tag.active {
-  border-color: #3b5bfd;
-  background: #3b5bfd;
+  border-color: #2d6a4f;
+  background: #2d6a4f;
   color: #fff;
 }
 
@@ -393,5 +453,11 @@ input {
   color: #6b7280;
   cursor: pointer;
   font-weight: 600;
+  transition: all 0.2s ease;
+}
+.secondary:hover {
+  border-color: #2d6a4f;
+  color: #2d6a4f;
+  background: #f1f8f4;
 }
 </style>

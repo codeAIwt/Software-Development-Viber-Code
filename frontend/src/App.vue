@@ -12,7 +12,7 @@ import CommonToast from "./components/CommonToast.vue";
 <style scoped>
 .page-shell {
   min-height: 100vh;
-  background: linear-gradient(180deg, #f6f7fb 0%, #eef1f7 100%);
+  background: #f6f7fb;
   color: #1c2533;
 }
 </style>

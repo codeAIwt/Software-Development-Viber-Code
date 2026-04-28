@@ -28,3 +28,37 @@ export function getRankList(studyDate, limit = 10) {
   }
   return client.get("/duration/rank", { params });
 }
+
+/**
+ * GET /api/duration/rank/weekly — 获取周排行榜
+ */
+export function getWeeklyRankList(weekStart, limit = 10) {
+  const params = { limit };
+  if (weekStart) {
+    params.week_start = weekStart;
+  }
+  return client.get("/duration/rank/weekly", { params });
+}
+
+/**
+ * GET /api/duration/rank/monthly — 获取月排行榜
+ */
+export function getMonthlyRankList(year, month, limit = 10) {
+  const params = { limit };
+  if (year) {
+    params.year = year;
+  }
+  if (month) {
+    params.month = month;
+  }
+  return client.get("/duration/rank/monthly", { params });
+}
+
+/**
+ * GET /api/duration/period/summary — 获取时间段学习时长汇总
+ */
+export function getPeriodSummary(period = 'week') {
+  return client.get("/duration/period/summary", {
+    params: { period }
+  });
+}

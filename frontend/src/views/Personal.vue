@@ -5,6 +5,8 @@ import * as userApi from "../api/user";
 import * as durationApi from "../api/duration";
 import { clearToken } from "../utils/auth";
 import { useUiStore } from "../store";
+import CheckInCard from "../components/CheckInCard.vue";
+import EditAvatar from "../components/EditAvatar.vue";
 
 const router = useRouter();
 const ui = useUiStore();
@@ -12,6 +14,7 @@ const profile = ref(null);
 const nicknameDraft = ref("");
 const saving = ref(false);
 const showTagsDialog = ref(false);
+const showAvatarDialog = ref(false);
 const selectedTags = ref([]);
 const loading = ref(true);
 
@@ -34,10 +37,11 @@ const formattedTodayDuration = computed(() => {
 async function load() {
   loading.value = true;
   try {
-    const [profileRes, tagsRes, durationRes] = await Promise.all([
+    const [profileRes, tagsRes, durationRes, monthlyRankRes] = await Promise.all([
       userApi.fetchProfile(),
       userApi.fetchSystemTags().catch(() => ({ data: { code: 200, data: [] } })),
-      durationApi.getDailyDuration(new Date().toISOString().split("T")[0]).catch(() => null)
+      durationApi.getDailyDuration(new Date().toISOString().split("T")[0]).catch(() => null),
+      durationApi.getMonthlyRankList().catch(() => null)
     ]);
 
     if (profileRes.data.code !== 200) {
@@ -55,7 +59,22 @@ async function load() {
 
     if (durationRes?.data?.code === 200) {
       todayDuration.value = durationRes.data.data.total_minutes || 0;
-      beatPercent.value = durationRes.data.data.beat_percent;
+    }
+
+    console.log('[Personal] monthlyRankRes:', monthlyRankRes);
+    console.log('[Personal] profileRes.data.data:', profileRes.data?.data);
+
+    if (monthlyRankRes?.data?.code === 200 && monthlyRankRes.data.data.length > 0) {
+      totalDuration.value = monthlyRankRes.data.data.reduce((sum, item) => sum + item.total_minutes, 0);
+      const userId = profileRes.data?.data?.user_id;
+      const userRankItem = monthlyRankRes.data.data.find(item => item.user_id === userId);
+      console.log('[Personal] userRankItem:', userRankItem);
+      if (userRankItem) {
+        beatPercent.value = userRankItem.beat_percent;
+        console.log('[Personal] beatPercent set to:', userRankItem.beat_percent);
+      } else {
+        beatPercent.value = 0;
+      }
     }
   } catch (e) {
     ui.showToast("网络错误：无法获取资源");
@@ -104,6 +123,12 @@ function openTagsDialog() {
 // 关闭标签选择弹窗
 function closeTagsDialog() {
   showTagsDialog.value = false;
+}
+
+function handleAvatarUpdated(avatarUrl) {
+  if (profile.value) {
+    profile.value.avatar = avatarUrl;
+  }
 }
 
 // 切换标签选择
@@ -187,7 +212,7 @@ async function saveTags() {
             <div class="avatar" :style="{ backgroundImage: profile.avatar ? `url(${profile.avatar})` : 'none' }">
               <span v-if="!profile.avatar">{{ profile.nickname?.charAt(0) || '?' }}</span>
             </div>
-            <button class="avatar-edit" title="更换头像">
+            <button class="avatar-edit" title="更换头像" @click="showAvatarDialog = true">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
                 <circle cx="12" cy="13" r="4"/>
@@ -316,6 +341,11 @@ async function saveTags() {
         </router-link>
       </section>
 
+      <!-- 打卡卡片 -->
+      <section class="checkin-section animate-item">
+        <CheckInCard />
+      </section>
+
       <!-- 退出登录 -->
       <section class="logout-section animate-item">
         <button class="btn-logout" @click="onLogout">
@@ -367,6 +397,13 @@ async function saveTags() {
         </div>
       </div>
     </Transition>
+
+    <!-- 头像编辑弹窗 -->
+    <EditAvatar
+      v-model="showAvatarDialog"
+      :current-avatar="profile?.avatar"
+      @avatar-updated="handleAvatarUpdated"
+    />
   </div>
 </template>
 

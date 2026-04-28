@@ -411,7 +411,7 @@ def leave_room(db: Session, user_id: str, room_id: str) -> dict:
         meta = cache.get_room_meta(room_id)
         if not meta:
             print(f"[room_service.leave_room] room {room_id} does not exist, returning early")
-            return {"room_id": room_id, "study_duration": 0}
+            return {"room_id": room_id, "study_duration": 0, "study_duration_minutes": 0, "room_closed": True}
         active_key = cache.room_users_active_key(room_id)
         try:
             is_active = r.sismember(active_key, user_id)
@@ -421,7 +421,7 @@ def leave_room(db: Session, user_id: str, room_id: str) -> dict:
         print(f"[room_service.leave_room] is_active={is_active} for user_id={user_id}")
         if not is_active:
             print(f"[room_service.leave_room] user {user_id} not in room {room_id}, returning early")
-            return {"room_id": room_id, "study_duration": 0}
+            return {"room_id": room_id, "study_duration": 0, "study_duration_minutes": 0, "room_closed": True}
 
         theme = meta.get("theme")
         idle_zset_key = cache.rooms_idle_zset_key(theme)
@@ -522,7 +522,9 @@ def leave_room(db: Session, user_id: str, room_id: str) -> dict:
 
         return {
             "room_id": room_id,
-            "study_duration": study_duration_minutes  # 转换为分钟
+            "study_duration": study_duration_minutes,
+            "study_duration_minutes": study_duration_minutes,
+            "room_closed": new_status == "closed"
         }
     finally:
         cache.release_room_leave_lock(room_id)
@@ -591,18 +593,34 @@ def destroy_room(db: Session, user_id: str, room_id: str) -> dict:
     meta = cache.get_room_meta(room_id)
     if not meta:
         raise RoomServiceError(404, "房间不存在", {})
-    
+
     # 检查是否是创建者
     if meta.get("creator_id") != user_id:
         raise RoomServiceError(403, "只有创建者可以销毁房间", {})
-    
+
     # 获取房间内的所有用户
     active_key = cache.room_users_active_key(room_id)
     users = r.smembers(active_key)
-    
+
     now_ms = _now_ms()
+
+    # 计算每个用户的学习时长
+    user_study_data = []
+    for user in users:
+        join_time_str = r.get(cache.user_join_time_key(room_id, user))
+        if join_time_str:
+            join_time = int(join_time_str)
+            study_duration = now_ms - join_time
+            user_study_data.append({
+                "user_id": user,
+                "join_time": join_time,
+                "leave_time": now_ms,
+                "study_duration": study_duration,
+                "study_duration_minutes": study_duration // 60000
+            })
+
     pipe = r.pipeline()
-    
+
     # 强制所有用户离开房间
     for user in users:
         # 记录离开时间和学习时长
@@ -612,7 +630,7 @@ def destroy_room(db: Session, user_id: str, room_id: str) -> dict:
             study_duration = now_ms - join_time
             pipe.set(cache.user_leave_time_key(room_id, user), str(now_ms))
             pipe.set(cache.user_study_duration_key(room_id, user), str(study_duration))
-    
+
     # 移除所有活跃用户
     pipe.srem(active_key, *users)
 
@@ -636,8 +654,10 @@ def destroy_room(db: Session, user_id: str, room_id: str) -> dict:
         pipe.delete(cache.user_study_duration_key(room_id, u))
 
     pipe.execute()
-    
+
     return {
         "room_id": room_id,
-        "message": "房间已销毁，所有成员已被强制退出",
+        "closed_by": "creator",
+        "message": "房间已销毁",
+        "users": user_study_data,
     }

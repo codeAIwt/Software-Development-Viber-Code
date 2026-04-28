@@ -37,6 +37,7 @@ export function useRoomData() {
 
     async function fetchRoomInfo(roomId) {
         try {
+            console.log('[fetchRoomInfo] 开始获取房间信息, roomId=', roomId);
             const { data } = await studyRoomApi.getRoomInfo(roomId);
             if (data.code === 200) {
                 roomInfo.value = data.data;
@@ -54,28 +55,59 @@ export function useRoomData() {
                     }
                     loadingUserInfo.value = false;
                 }
+                console.log('[fetchRoomInfo] 成功, roomInfo.status=', roomInfo.value.status);
                 return { ok: true, closed: roomInfo.value.status === 'closed' };
             }
+            console.log('[fetchRoomInfo] 失败, code=', data.code);
             return { ok: false };
         } catch (e) {
             const status = e.response?.status;
+            console.log('[fetchRoomInfo] 异常, status=', status);
             return { ok: false, status };
         }
     }
 
-    function startPolling(roomId, intervalMs = 5000, onClosed) {
+    function startPolling(roomId, intervalMs = 5000, onClosed, isLeavingGetter = null) {
         if (roomInfoTimer.value) clearInterval(roomInfoTimer.value);
+        let consecutive404Count = 0;
+        const MAX_404_BEFORE_CLOSED = 3;
+
         roomInfoTimer.value = setInterval(async () => {
             const res = await fetchRoomInfo(roomId);
-            if (res.ok && res.closed) {
+            console.log('[轮询] fetchRoomInfo 返回, res=', JSON.stringify(res));
+
+            // 检查是否正在离开房间
+            if (isLeavingGetter && isLeavingGetter()) {
+                console.log('[轮询] 正在离开房间，停止轮询');
                 clearInterval(roomInfoTimer.value);
                 roomInfoTimer.value = null;
-                onClosed?.();
+                consecutive404Count = 0;
+                return;
             }
-            if (res.status === 404) {
+
+            if (res.ok && res.closed) {
+                console.log('[轮询] 房间已关闭，停止轮询');
                 clearInterval(roomInfoTimer.value);
                 roomInfoTimer.value = null;
+                consecutive404Count = 0;
                 onClosed?.();
+                return;
+            }
+
+            if (res.status === 404) {
+                consecutive404Count++;
+                console.log(`[轮询] 房间不存在(404)，连续第${consecutive404Count}次（最多${MAX_404_BEFORE_CLOSED}次）`);
+                if (consecutive404Count >= MAX_404_BEFORE_CLOSED) {
+                    console.log('[轮询] 连续多次404，房间被认为已关闭');
+                    clearInterval(roomInfoTimer.value);
+                    roomInfoTimer.value = null;
+                    consecutive404Count = 0;
+                    if (!isLeavingGetter || !isLeavingGetter()) {
+                        onClosed?.();
+                    }
+                }
+            } else {
+                consecutive404Count = 0;
             }
         }, intervalMs);
     }

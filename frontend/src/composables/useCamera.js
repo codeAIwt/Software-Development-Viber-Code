@@ -1,11 +1,25 @@
 import { ref } from 'vue';
 import { startCamera as startCameraApi, stopCamera as stopCameraApi, checkCameraPermission } from '../utils/video';
 
-export function useCamera(videoRef, canvasRef, privacyMode) {
+export function useCamera() {
+    const videoRef = ref(null);
+    const canvasRef = ref(null);
     const localStream = ref(null);
     const cameraOn = ref(true);
     const cameraError = ref(false);
     const cameraLoading = ref(false);
+    const privacyMode = ref('off');
+
+    const privacyModes = [
+        { value: 'off', label: '关闭隐私模式' },
+        { value: 'blur', label: '模糊模式' },
+        { value: 'hand', label: '手部遮挡模式' }
+    ];
+
+    function setRefs(video, canvas) {
+        videoRef.value = video;
+        canvasRef.value = canvas;
+    }
 
     async function initCamera() {
         cameraLoading.value = true;
@@ -72,13 +86,24 @@ export function useCamera(videoRef, canvasRef, privacyMode) {
         };
     }
 
+    function changePrivacyMode(mode) {
+        privacyMode.value = mode;
+        applyPrivacyMode();
+    }
+
     return {
+        videoRef,
+        canvasRef,
         localStream,
         cameraOn,
         cameraError,
         cameraLoading,
+        privacyMode,
+        privacyModes,
+        setRefs,
         initCamera,
         stopCamera,
         applyPrivacyMode,
+        changePrivacyMode,
     };
 }

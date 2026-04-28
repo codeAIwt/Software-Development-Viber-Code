@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
 from jose import JWTError, jwt
 from pydantic import BaseModel, Field
@@ -71,7 +71,7 @@ def register(request: Request, body: RegisterBody, db: Session = Depends(get_db)
 
 
 @router.post("/login")
-def login(request: Request, body: LoginBody, db: Session = Depends(get_db)):
+def login(request: Request, response: Response, body: LoginBody, db: Session = Depends(get_db)):
     allowed, _ = cache.rate_limit_increment(
         "rl:ip:login",
         _client_ip(request),
@@ -83,11 +83,20 @@ def login(request: Request, body: LoginBody, db: Session = Depends(get_db)):
         user = user_service.login_user(db, body.phone.strip(), body.password)
     except UserServiceError as e:
         return _json_err(400, e.code, e.msg)
-    token, _, _ = auth_utils.create_access_token(user.id)
+    token, jti, ttl = auth_utils.create_access_token(user.id)
     is_first_login = user.is_first_login
-    # 登录后设置为非首次登录
     if is_first_login:
         user_service.set_first_login(db, user, False)
+
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        max_age=ttl,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+    )
+
     return _json_ok(
         {"user_id": user.id, "token": token, "is_first_login": is_first_login},
         msg="登录成功",
@@ -155,6 +164,18 @@ def profile_tags(body: TagsBody, user: User = Depends(auth_utils.get_current_use
         return _json_err(400, e.code, e.msg)
     return _json_ok({"user_id": user.id, "tags": body.tags}, msg="标签更新成功")
 
+
+@router.put("/profile/avatar")
+def profile_avatar(body: dict, user: User = Depends(auth_utils.get_current_user), db: Session = Depends(get_db)):
+    try:
+        avatar_url = body.get("avatar_url")
+        if not avatar_url:
+            return _json_err(400, 400, "avatar_url不能为空")
+        user = user_service.update_avatar(db, user, avatar_url)
+    except UserServiceError as e:
+        return _json_err(400, e.code, e.msg)
+    return _json_ok({"user_id": user.id, "avatar": user.avatar}, msg="头像更新成功")
+
 @router.get("/info/{user_id}")
 def get_user_info(
     user_id: str,
@@ -168,3 +189,26 @@ def get_user_info(
         return _json_ok({"nickname": user.nickname, "phone": user.phone})
     except UserServiceError as e:
         return _json_err(400, e.code, e.msg)
+
+
+from services.check_in_service import check_in as check_in_service_check_in, get_check_in_status as check_in_service_get_status
+
+
+@router.post("/check-in")
+def check_in(user: User = Depends(auth_utils.get_current_user), db: Session = Depends(get_db)):
+    """用户打卡"""
+    try:
+        result = check_in_service_check_in(db, user.id)
+        return _json_ok(result, msg=result.get("msg", "打卡成功"))
+    except Exception as e:
+        return _json_err(500, 500, str(e))
+
+
+@router.get("/check-in/status")
+def get_check_in_status(user: User = Depends(auth_utils.get_current_user), db: Session = Depends(get_db)):
+    """获取用户打卡状态"""
+    try:
+        result = check_in_service_get_status(db, user.id)
+        return _json_ok(result)
+    except Exception as e:
+        return _json_err(500, 500, str(e))

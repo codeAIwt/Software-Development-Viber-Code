@@ -61,7 +61,12 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=[
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:3000",
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -106,7 +111,7 @@ def create_app() -> FastAPI:
                         )
         except WebSocketDisconnect:
             manager.disconnect(room_id, user_id)
-            # 尝试在服务器端将该用户从房间中移除（清理 Redis / 持久化学习时长）
+            # WebSocket断开时自动leave_room
             try:
                 db = SessionLocal()
                 try:

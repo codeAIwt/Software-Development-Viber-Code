@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -106,6 +106,7 @@ def join_room(
 
 @router.post("/leave")
 def leave_room(
+    request: Request,
     body: RoomLeaveBody,
     user: User = Depends(auth_utils.get_current_user),
     db: Session = Depends(get_db),
@@ -183,11 +184,11 @@ def detect_person_api(
         
         # 检测是否有人
         has_person = detect_person(image_data)
-        
-        if not has_person:
-            # 检测到无人，自动退出房间
-            room_service.leave_room(db, user.id, body.room_id)
-        
+
+        # 注意：不再在后端自动移除用户，由前端控制退出逻辑（连续3次无人）
+        # if not has_person:
+        #     room_service.leave_room(db, user.id, body.room_id)
+
         return _json_ok({
             "has_person": has_person
         })

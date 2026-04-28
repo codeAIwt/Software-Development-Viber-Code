@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
@@ -34,11 +34,20 @@ def get_bearer_token(authorization: str | None) -> str | None:
     return None
 
 
+def get_token_from_cookie(request: Request) -> str | None:
+    return request.cookies.get("access_token")
+
+
 def get_current_user(
     authorization: str | None = Header(default=None),
+    request: Request = None,
     db: Session = Depends(get_db),
 ) -> User:
     token = get_bearer_token(authorization)
+
+    if not token and request:
+        token = get_token_from_cookie(request)
+
     if not token:
         raise HTTPException(status_code=401, detail={"code": 401, "msg": "缺少 Token", "data": {}})
     try:

@@ -50,3 +50,24 @@ export function fetchCurrentUser() {
 export function fetchSystemTags() {
   return client.get("/user/tags");
 }
+
+/**
+ * 用户打卡
+ */
+export function checkIn() {
+  return client.post("/user/check-in");
+}
+
+/**
+ * 获取打卡状态
+ */
+export function getCheckInStatus() {
+  return client.get("/user/check-in/status");
+}
+
+/**
+ * 更新头像
+ */
+export function updateAvatar(avatarUrl) {
+  return client.put("/user/profile/avatar", { avatar_url: avatarUrl });
+}

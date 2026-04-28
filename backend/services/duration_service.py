@@ -4,6 +4,7 @@ from datetime import datetime, date, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from models.study_duration import StudyDuration
+from models.user import User
 from utils import cache
 
 
@@ -179,6 +180,10 @@ def get_rank_list(db: Session, study_date: date, limit: int = 10) -> list:
     
     if rank_data:
         # 缓存存在，从缓存构建排行榜
+        user_ids = list(rank_data.keys())
+        users = db.query(User).filter(User.id.in_(user_ids)).all()
+        user_nickname_map = {u.id: u.nickname for u in users}
+
         rank_items = []
         for user_id, beat_percent_str in rank_data.items():
             # 从数据库获取用户的学习时长
@@ -186,14 +191,15 @@ def get_rank_list(db: Session, study_date: date, limit: int = 10) -> list:
                 StudyDuration.user_id == user_id,
                 StudyDuration.study_date == study_date
             ).first()
-            
+
             if record:
                 rank_items.append({
                     "user_id": user_id,
+                    "nickname": user_nickname_map.get(user_id, "匿名用户"),
                     "beat_percent": float(beat_percent_str),
                     "total_minutes": record.total_minutes
                 })
-        
+
         # 按击败百分比排序
         rank_items.sort(key=lambda x: x["beat_percent"], reverse=True)
         return rank_items[:limit]
@@ -220,34 +226,42 @@ def calculate_real_time_rank_list(db: Session, study_date: date, limit: int = 10
     
     # 计算有效用户数（学习时长>0）
     effective_users = len([r for r in records if r.total_minutes > 0])
-    
-    if effective_users <= 1:
+
+    if effective_users == 0:
         return []
-    
+
+    # 获取所有相关用户的昵称
+    user_ids = list(set(r.user_id for r in records))
+    users = db.query(User).filter(User.id.in_(user_ids)).all()
+    user_nickname_map = {u.id: u.nickname for u in users}
+
     # 实时计算每个用户的击败百分比
     rank_items = []
     for record in records:
         if record.total_minutes > 0:
             # 计算学习时长小于当前用户的人数
             less_count = len([r for r in records if r.total_minutes < record.total_minutes and r.total_minutes > 0])
-            
-            # 计算击败百分比（排除自身，所以用 effective_users - 1）
-            beat_percent = (less_count / (effective_users - 1)) * 100
+
+            # 计算击败百分比（排除自身）
+            # effective_users >= 2 时正常计算，effective_users == 1 时除数为1，结果为0
+            divisor = effective_users - 1 if effective_users > 1 else 1
+            beat_percent = (less_count / divisor) * 100
             # 四舍五入到两位小数
             beat_percent = round(beat_percent, 2)
-            
+
             rank_items.append({
                 "user_id": record.user_id,
+                "nickname": user_nickname_map.get(record.user_id, "匿名用户"),
                 "beat_percent": beat_percent,
                 "total_minutes": record.total_minutes
             })
-    
+
     # 按击败百分比排序
     rank_items.sort(key=lambda x: x["beat_percent"], reverse=True)
-    
+
     # 更新缓存（下次查询可以直接使用）
     update_real_time_rank_cache(rank_items, study_date)
-    
+
     return rank_items[:limit]
 
 
@@ -259,13 +273,162 @@ def update_real_time_rank_cache(rank_items: list, study_date: date) -> None:
     """
     r = cache._redis()
     key = f"rank:beat:{study_date}"
-    
+
     # 清空现有缓存
     r.delete(key)
-    
+
     # 更新缓存
     for item in rank_items:
         r.hset(key, item["user_id"], str(item["beat_percent"]))
-    
+
     # 设置缓存过期时间（10分钟）
     r.expire(key, 10 * 60)
+
+
+def get_user_period_duration(db: Session, user_id: str, start_date: date, end_date: date) -> dict:
+    """
+    获取用户某个时间段的学习时长汇总
+    :param db: 数据库会话
+    :param user_id: 用户ID
+    :param start_date: 开始日期
+    :param end_date: 结束日期
+    :return: 时间段学习时长汇总
+    """
+    records = db.query(StudyDuration).filter(
+        StudyDuration.user_id == user_id,
+        StudyDuration.study_date >= start_date,
+        StudyDuration.study_date <= end_date
+    ).all()
+
+    total_minutes = sum(record.total_minutes for record in records)
+
+    return {
+        "user_id": user_id,
+        "start_date": start_date,
+        "end_date": end_date,
+        "total_minutes": total_minutes,
+        "days_count": len([r for r in records if r.total_minutes > 0])
+    }
+
+
+def get_weekly_rank_list(db: Session, week_start_date: date, limit: int = 10) -> list:
+    """
+    获取周排行榜
+    :param db: 数据库会话
+    :param week_start_date: 周开始日期（周一）
+    :param limit: 返回数量限制
+    :return: 周排行榜列表
+    """
+    week_end_date = week_start_date + timedelta(days=6)
+
+    # 获取该周所有学习记录
+    records = db.query(StudyDuration).filter(
+        StudyDuration.study_date >= week_start_date,
+        StudyDuration.study_date <= week_end_date
+    ).all()
+
+    if not records:
+        return []
+
+    # 按用户汇总学习时长
+    user_totals = {}
+    for record in records:
+        if record.user_id not in user_totals:
+            user_totals[record.user_id] = 0
+        user_totals[record.user_id] += record.total_minutes
+
+    # 计算有效用户数（学习时长>0）
+    effective_users = len([u for u, total in user_totals.items() if total > 0])
+
+    if effective_users == 0:
+        return []
+
+    # 获取所有相关用户的昵称
+    user_ids = list(user_totals.keys())
+    users = db.query(User).filter(User.id.in_(user_ids)).all()
+    user_nickname_map = {u.id: u.nickname for u in users}
+
+    # 构建排行数据
+    rank_items = []
+    for user_id, total_minutes in user_totals.items():
+        if total_minutes > 0:
+            # 计算击败百分比
+            less_count = len([u for u, t in user_totals.items() if t < total_minutes and t > 0])
+            beat_percent = round((less_count / (effective_users - 1)) * 100, 2)
+
+            rank_items.append({
+                "user_id": user_id,
+                "nickname": user_nickname_map.get(user_id, "匿名用户"),
+                "total_minutes": total_minutes,
+                "beat_percent": beat_percent
+            })
+
+    # 按学习时长降序排序
+    rank_items.sort(key=lambda x: x["total_minutes"], reverse=True)
+
+    return rank_items[:limit]
+
+
+def get_monthly_rank_list(db: Session, year: int, month: int, limit: int = 10) -> list:
+    """
+    获取月排行榜
+    :param db: 数据库会话
+    :param year: 年份
+    :param month: 月份
+    :param limit: 返回数量限制
+    :return: 月排行榜列表
+    """
+    # 计算月的开始和结束日期
+    if month == 12:
+        month_start = date(year, 12, 1)
+        month_end = date(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        month_start = date(year, month, 1)
+        month_end = date(year, month + 1, 1) - timedelta(days=1)
+
+    # 获取该月所有学习记录
+    records = db.query(StudyDuration).filter(
+        StudyDuration.study_date >= month_start,
+        StudyDuration.study_date <= month_end
+    ).all()
+
+    if not records:
+        return []
+
+    # 按用户汇总学习时长
+    user_totals = {}
+    for record in records:
+        if record.user_id not in user_totals:
+            user_totals[record.user_id] = 0
+        user_totals[record.user_id] += record.total_minutes
+
+    # 计算有效用户数（学习时长>0）
+    effective_users = len([u for u, total in user_totals.items() if total > 0])
+
+    if effective_users <= 1:
+        return []
+
+    # 获取所有相关用户的昵称
+    user_ids = list(user_totals.keys())
+    users = db.query(User).filter(User.id.in_(user_ids)).all()
+    user_nickname_map = {u.id: u.nickname for u in users}
+
+    # 构建排行数据
+    rank_items = []
+    for user_id, total_minutes in user_totals.items():
+        if total_minutes > 0:
+            # 计算击败百分比
+            less_count = len([u for u, t in user_totals.items() if t < total_minutes and t > 0])
+            beat_percent = round((less_count / (effective_users - 1)) * 100, 2)
+
+            rank_items.append({
+                "user_id": user_id,
+                "nickname": user_nickname_map.get(user_id, "匿名用户"),
+                "total_minutes": total_minutes,
+                "beat_percent": beat_percent
+            })
+
+    # 按学习时长降序排序
+    rank_items.sort(key=lambda x: x["total_minutes"], reverse=True)
+
+    return rank_items[:limit]

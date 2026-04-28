@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, ref, computed } from "vue";
+import { onMounted, onUnmounted, ref, computed, watch } from "vue";
 import { useRouter } from "vue-router";
 import * as studyRoomApi from "../api/studyRoom";
 import * as userApi from "../api/user";
@@ -11,6 +11,12 @@ const props = defineProps({
 
 const router = useRouter();
 const ui = useUiStore();
+
+const currentUserId = localStorage.getItem('user_id');
+
+// 待显示的学习时长弹窗
+const showDurationDialog = ref(false);
+const pendingDurationData = ref(null);
 
 // 基础主题列表
 const baseThemes = ["考研", "期末", "考公", "语言"];
@@ -24,9 +30,12 @@ const showTagSelectDialog = ref(false);
 const selectedRoomTags = ref([]);
 
 // 筛选相关
-const selectedTheme = ref("考研");
-const maxPeople = ref(2);
+const selectedTheme = ref("全部");
 const rooms = ref([]);
+
+// 创建房间相关
+const selectedRoomTheme = ref("考研");
+const selectedRoomMaxPeople = ref(2);
 
 const loadingList = ref(false);
 const creating = ref(false);
@@ -42,19 +51,52 @@ const searchQuery = ref("");
 
 // 所有可用的主题和标签（用于筛选）
 const allAvailableThemes = computed(() => {
-  return [...baseThemes, ...userTags.value];
+  return ["全部", ...new Set([...baseThemes, ...userTags.value])];
 });
+
+// 筛选后的人数上限选项
+const maxPeopleOptions = [1, 2, 4, 6, 8];
 
 // 过滤后的房间列表
 const filteredRooms = computed(() => {
-  if (!searchQuery.value.trim()) return rooms.value;
-  const query = searchQuery.value.toLowerCase();
-  return rooms.value.filter(room => 
-    room.theme.toLowerCase().includes(query) ||
-    room.tags?.some(tag => tag.toLowerCase().includes(query)) ||
-    (userInfoMap.value.get(room.creator_id)?.nickname || '').toLowerCase().includes(query)
-  );
+  let result = rooms.value;
+
+  // 按主题筛选
+  if (selectedTheme.value && selectedTheme.value !== "全部") {
+    result = result.filter(room =>
+      room.theme === selectedTheme.value ||
+      (room.tags && room.tags.includes(selectedTheme.value))
+    );
+  }
+
+  // 搜索过滤
+  if (searchQuery.value.trim()) {
+    const query = searchQuery.value.toLowerCase();
+    result = result.filter(room =>
+      room.theme.toLowerCase().includes(query) ||
+      room.tags?.some(tag => tag.toLowerCase().includes(query)) ||
+      (userInfoMap.value.get(room.creator_id)?.nickname || '').toLowerCase().includes(query) ||
+      room.room_id.toLowerCase().includes(query)
+    );
+  }
+
+  return result;
 });
+
+// 监听 pendingDuration 变化，自动显示弹窗
+watch(() => ui.pendingDuration, async (newVal) => {
+  if (newVal) {
+    pendingDurationData.value = newVal;
+    // 加载所有用户的昵称
+    if (newVal.allUsers && newVal.allUsers.length > 0) {
+      await Promise.all(
+        newVal.allUsers.map(user => getUserInfo(user.user_id))
+      );
+    }
+    showDurationDialog.value = true;
+    ui.clearPendingDuration();
+  }
+}, { immediate: true });
 
 // 加载用户标签
 async function loadUserTags() {
@@ -92,38 +134,81 @@ async function getUserInfo(userId) {
   return null;
 }
 
-async function loadRooms() {
-  loadingList.value = true;
+// 获取用户显示名称
+function getUserDisplayName(userId) {
+  if (userId === currentUserId) {
+    return '我';
+  }
+  const userInfo = userInfoMap.value.get(userId);
+  return userInfo?.nickname || userId;
+}
+
+// 智能更新房间列表 - 避免闪烁
+function updateRooms(newRooms) {
+  const newRoomMap = new Map(newRooms.map(r => [r.room_id, r]));
+  const existingRoomMap = new Map(rooms.value.map(r => [r.room_id, r]));
+
+  // 更新现有房间和添加新房间
+  newRooms.forEach(newRoom => {
+    const existingRoom = existingRoomMap.get(newRoom.room_id);
+    if (existingRoom) {
+      // 更新已存在的房间（只更新变化的字段）
+      if (JSON.stringify(existingRoom) !== JSON.stringify(newRoom)) {
+        Object.assign(existingRoom, newRoom);
+      }
+    } else {
+      // 添加新房间
+      rooms.value.push(newRoom);
+    }
+  });
+
+  // 移除不存在的房间
+  const newRoomIds = new Set(newRoomMap.keys());
+  rooms.value = rooms.value.filter(r => newRoomIds.has(r.room_id));
+
+  // 按创建时间排序（最新的在前）
+  rooms.value.sort((a, b) => (b.created_ts_ms || 0) - (a.created_ts_ms || 0));
+}
+
+async function loadRooms(isInitial = false) {
+  if (isInitial) {
+    loadingList.value = true;
+  }
   try {
     const { data } = await studyRoomApi.listRooms(null);
     if (data.code === 200) {
-      let filteredRooms = data.data.rooms || [];
-      filteredRooms = filteredRooms.filter((room) => room.status === "idle");
+      let allRooms = data.data.rooms || [];
+      // 只过滤状态为idle的房间，不做主题筛选（主题筛选由computed处理）
+      allRooms = allRooms.filter((room) => room.status === "idle");
 
-      if (selectedTheme.value) {
-        filteredRooms = filteredRooms.filter((room) => {
-          return (
-            room.theme === selectedTheme.value ||
-            (room.tags && room.tags.includes(selectedTheme.value))
-          );
-        });
+      // 批量加载创建者信息（并行请求）
+      const roomsNeedingUserInfo = allRooms.filter(
+        room => room.creator_id && !userInfoMap.value.has(room.creator_id)
+      );
+      if (roomsNeedingUserInfo.length > 0) {
+        loadingUserInfo.value = true;
+        await Promise.all(
+          roomsNeedingUserInfo.map(room => getUserInfo(room.creator_id))
+        );
+        loadingUserInfo.value = false;
       }
 
-      loadingUserInfo.value = true;
-      for (const room of filteredRooms) {
-        if (room.creator_id) {
-          await getUserInfo(room.creator_id);
-        }
+      // 智能更新而非直接替换
+      if (isInitial) {
+        rooms.value = allRooms;
+      } else {
+        updateRooms(allRooms);
       }
-      loadingUserInfo.value = false;
-
-      rooms.value = filteredRooms;
     }
   } catch (e) {
-    ui.showToast(e.response?.data?.msg || e.message || "加载失败");
+    if (isInitial) {
+      ui.showToast(e.response?.data?.msg || e.message || "加载失败");
+    }
     loadingUserInfo.value = false;
   } finally {
-    loadingList.value = false;
+    if (isInitial) {
+      loadingList.value = false;
+    }
   }
 }
 
@@ -159,8 +244,8 @@ async function onCreate() {
     }
 
     const { data } = await studyRoomApi.createRoom(
-      selectedTheme.value,
-      maxPeople.value,
+      selectedRoomTheme.value,
+      selectedRoomMaxPeople.value,
       selectedRoomTags.value,
     );
     if (data.code !== 200) {
@@ -207,9 +292,9 @@ let refreshTimer = null;
 
 onMounted(async () => {
   await loadUserTags();
-  await loadRooms();
-  refreshTimer = setInterval(async () => {
-    await loadRooms();
+  await loadRooms(true);
+  refreshTimer = setInterval(() => {
+    loadRooms(false);
   }, 5000);
 });
 
@@ -245,9 +330,9 @@ onUnmounted(() => {
           <circle cx="11" cy="11" r="8"/>
           <line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
-        <input 
+        <input
           v-model="searchQuery"
-          type="text" 
+          type="text"
           placeholder="搜索房间、标签、创建者..."
         />
       </div>
@@ -255,15 +340,9 @@ onUnmounted(() => {
       <!-- 主题筛选 -->
       <div class="filter-group">
         <label>主题</label>
-        <select v-model="selectedTheme" @change="loadRooms">
+        <select v-model="selectedTheme">
           <option v-for="t in allAvailableThemes" :key="t" :value="t">{{ t }}</option>
         </select>
-      </div>
-
-      <!-- 人数设置 -->
-      <div class="filter-group">
-        <label>人数上限</label>
-        <input v-model.number="maxPeople" type="number" min="1" max="8" />
       </div>
     </div>
 
@@ -374,33 +453,103 @@ onUnmounted(() => {
           </div>
 
           <div class="dialog-body">
-            <p class="dialog-hint">选择标签（最多3个）</p>
-            <div class="tags-grid">
-              <button
-                v-for="tag in availableTags"
-                :key="tag"
-                class="tag-option"
-                :class="{ active: selectedRoomTags.includes(tag) }"
-                @click="toggleTag(tag)"
-              >
-                {{ tag }}
-                <svg v-if="selectedRoomTags.includes(tag)" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                  <polyline points="20,6 9,17 4,12"/>
-                </svg>
-              </button>
+            <!-- 主题选择 -->
+            <div class="form-group">
+              <label class="form-label">自习室主题</label>
+              <div class="theme-grid">
+                <button
+                  v-for="theme in baseThemes"
+                  :key="theme"
+                  class="theme-option"
+                  :class="[getThemeClass(theme), { active: selectedRoomTheme === theme }]"
+                  @click="selectedRoomTheme = theme"
+                >
+                  {{ theme }}
+                </button>
+              </div>
+            </div>
+
+            <!-- 人数上限选择 -->
+            <div class="form-group">
+              <label class="form-label">人数上限</label>
+              <div class="max-people-grid">
+                <button
+                  v-for="num in maxPeopleOptions"
+                  :key="num"
+                  class="max-people-option"
+                  :class="{ active: selectedRoomMaxPeople === num }"
+                  @click="selectedRoomMaxPeople = num"
+                >
+                  {{ num }}人
+                </button>
+              </div>
+            </div>
+
+            <!-- 标签选择 -->
+            <div class="form-group">
+              <label class="form-label">选择标签（最多3个）</label>
+              <div class="tags-grid">
+                <button
+                  v-for="tag in availableTags"
+                  :key="tag"
+                  class="tag-option"
+                  :class="{ active: selectedRoomTags.includes(tag) }"
+                  @click="toggleTag(tag)"
+                >
+                  {{ tag }}
+                  <svg v-if="selectedRoomTags.includes(tag)" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                    <polyline points="20,6 9,17 4,12"/>
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
 
           <div class="dialog-footer">
             <button class="btn-secondary" @click="closeTagSelectDialog">取消</button>
-            <button 
-              class="btn-primary" 
+            <button
+              class="btn-primary"
               :disabled="creating || selectedRoomTags.length === 0"
               @click="onCreate"
             >
               <span v-if="creating" class="loading-spinner white"></span>
               {{ creating ? "创建中" : "创建房间" }}
             </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- 学习时长弹窗 -->
+    <Transition name="dialog">
+      <div v-if="showDurationDialog" class="dialog-overlay" @click="showDurationDialog = false">
+        <div class="dialog" @click.stop>
+          <div class="dialog-header">
+            <h3>{{ pendingDurationData?.type === 'destroy' ? '房间已销毁' : '学习时长' }}</h3>
+            <button class="dialog-close" @click="showDurationDialog = false">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
+          <div class="dialog-body">
+            <template v-if="pendingDurationData?.type === 'destroy' && pendingDurationData?.allUsers?.length > 1">
+              <p class="muted">以下是该房间所有成员的学习时长：</p>
+              <div class="users-duration-list">
+                <div v-for="user in pendingDurationData.allUsers" :key="user.user_id" class="user-duration-item">
+                  <span class="user-duration-name">{{ getUserDisplayName(user.user_id) }}</span>
+                  <span class="user-duration-value">{{ user.study_duration_minutes }} 分钟</span>
+                </div>
+              </div>
+            </template>
+            <template v-else>
+              <p>您的学习时长为：</p>
+              <p class="duration-value">{{ pendingDurationData?.duration || 0 }} 分钟</p>
+            </template>
+          </div>
+          <div class="dialog-footer">
+            <button class="btn-primary" @click="showDurationDialog = false">确定</button>
           </div>
         </div>
       </div>
@@ -898,6 +1047,97 @@ onUnmounted(() => {
   color: var(--color-text-muted, #6b7280);
 }
 
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group:last-child {
+  margin-bottom: 0;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text, #1c2533);
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.theme-option {
+  padding: 14px 12px;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.theme-option.theme-green {
+  background: var(--color-primary-bg, #e8f5e9);
+  color: var(--color-primary, #2d6a4f);
+}
+
+.theme-option.theme-orange {
+  background: var(--color-secondary-bg, #fff3e0);
+  color: #e65100;
+}
+
+.theme-option.theme-pink {
+  background: #fce4ec;
+  color: #ad1457;
+}
+
+.theme-option.theme-purple {
+  background: #f3e5f5;
+  color: #6a1b9a;
+}
+
+.theme-option:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.theme-option.active {
+  border-color: var(--color-primary, #2d6a4f);
+  box-shadow: 0 0 0 3px rgba(45, 106, 79, 0.2);
+}
+
+.max-people-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+.max-people-option {
+  padding: 12px 8px;
+  border: 2px solid var(--color-border-light, #d7dbe4);
+  border-radius: 10px;
+  background: var(--color-bg-input, #f9fafb);
+  color: var(--color-text-secondary, #374151);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.max-people-option:hover {
+  border-color: var(--color-primary, #2d6a4f);
+  background: var(--color-primary-bg, #e8f5e9);
+}
+
+.max-people-option.active {
+  border-color: var(--color-primary, #2d6a4f);
+  background: var(--color-primary, #2d6a4f);
+  color: #fff;
+}
+
 .tags-grid {
   display: flex;
   flex-wrap: wrap;
@@ -991,6 +1231,45 @@ onUnmounted(() => {
 .dialog-enter-from .dialog,
 .dialog-leave-to .dialog {
   transform: scale(0.95) translateY(20px);
+}
+
+/* 学习时长弹窗 */
+.users-duration-list {
+  max-height: 300px;
+  overflow-y: auto;
+  margin: 16px 0;
+  border: 1px solid var(--color-border, #e6eaf2);
+  border-radius: 12px;
+}
+
+.user-duration-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border, #e6eaf2);
+}
+
+.user-duration-item:last-child {
+  border-bottom: none;
+}
+
+.user-duration-name {
+  font-weight: 500;
+  color: var(--color-text, #1c2533);
+}
+
+.user-duration-value {
+  font-weight: 700;
+  color: var(--color-primary, #2d6a4f);
+}
+
+.duration-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--color-primary, #2d6a4f);
+  text-align: center;
+  margin: 16px 0;
 }
 
 /* 响应式 */

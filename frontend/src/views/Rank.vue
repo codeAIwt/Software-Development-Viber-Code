@@ -8,18 +8,26 @@ const loading = ref(false);
 const rankList = ref([]);
 const currentDate = ref(new Date().toISOString().split('T')[0]);
 const personalDuration = ref({});
+const personalPeriodDuration = ref({});
 const updateInterval = ref(null);
 const activeTab = ref('today');
 
-// 超参数：更新间隔（5分钟）
 const UPDATE_INTERVAL = 5 * 60 * 1000;
 
-// 计算属性：是否有个人学习记录
+const tabOptions = [
+  { value: 'today', label: '今日' },
+  { value: 'week', label: '本周' },
+  { value: 'month', label: '本月' }
+];
+
 const hasPersonalRecord = computed(() => {
   return personalDuration.value && personalDuration.value.total_minutes > 0;
 });
 
-// 计算属性：格式化学习时长
+const hasPersonalPeriodRecord = computed(() => {
+  return personalPeriodDuration.value && personalPeriodDuration.value.total_minutes > 0;
+});
+
 const formattedDuration = computed(() => {
   if (!hasPersonalRecord.value) return { value: 0, unit: '分钟' };
   const hours = Math.floor(personalDuration.value.total_minutes / 60);
@@ -30,27 +38,41 @@ const formattedDuration = computed(() => {
   return { value: minutes, unit: '分钟' };
 });
 
-// 计算最大学习时长（用于进度条）
+const formattedPeriodDuration = computed(() => {
+  if (!hasPersonalPeriodRecord.value) return { value: 0, unit: '分钟' };
+  const hours = Math.floor(personalPeriodDuration.value.total_minutes / 60);
+  const minutes = personalPeriodDuration.value.total_minutes % 60;
+  if (hours > 0) {
+    return { value: hours, unit: '小时', extra: `${minutes}分钟` };
+  }
+  return { value: minutes, unit: '分钟' };
+});
+
 const maxDuration = computed(() => {
   if (rankList.value.length === 0) return 0;
   return Math.max(...rankList.value.map(item => item.total_minutes));
 });
 
-// 计算个人排名
 const personalRank = computed(() => {
   if (!personalDuration.value?.user_id) return null;
   const index = rankList.value.findIndex(item => item.user_id === personalDuration.value.user_id);
   return index >= 0 ? index + 1 : null;
 });
 
-// 格式化时长
 function formatDuration(minutes) {
+  if (!minutes) return '0分钟';
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
   if (hours > 0) {
     return `${hours}小时${mins}分钟`;
   }
   return `${mins}分钟`;
+}
+
+function formatDateRange(startDate, endDate) {
+  const start = new Date(startDate).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+  const end = new Date(endDate).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+  return `${start} - ${end}`;
 }
 
 async function loadPersonalDuration() {
@@ -68,14 +90,37 @@ async function loadPersonalDuration() {
   }
 }
 
+async function loadPersonalPeriodDuration() {
+  try {
+    const { data } = await durationApi.getPeriodSummary(activeTab.value);
+    if (data.code === 200) {
+      personalPeriodDuration.value = data.data;
+    }
+  } catch (error) {
+    console.error('获取个人周期学习时长失败:', error);
+    personalPeriodDuration.value = {
+      total_minutes: 0,
+      days_count: 0
+    };
+  }
+}
+
 async function loadRankList() {
   loading.value = true;
   try {
-    const { data } = await durationApi.getRankList(currentDate.value);
-    if (data.code === 200) {
-      rankList.value = data.data;
+    let res;
+    if (activeTab.value === 'today') {
+      res = await durationApi.getRankList(currentDate.value);
+    } else if (activeTab.value === 'week') {
+      res = await durationApi.getWeeklyRankList();
+    } else if (activeTab.value === 'month') {
+      res = await durationApi.getMonthlyRankList();
+    }
+
+    if (res?.data.code === 200) {
+      rankList.value = res.data.data;
     } else {
-      ui.showToast(data.msg || '获取排行榜失败');
+      ui.showToast(res?.data?.msg || '获取排行榜失败');
       rankList.value = [];
     }
   } catch (error) {
@@ -87,7 +132,6 @@ async function loadRankList() {
   }
 }
 
-// 手动刷新数据
 async function refreshData() {
   await loadAllData();
   ui.showToast('数据已刷新');
@@ -97,25 +141,24 @@ async function refreshData() {
 async function loadAllData() {
   await Promise.all([
     loadPersonalDuration(),
+    loadPersonalPeriodDuration(),
     loadRankList()
   ]);
 }
 
-// Tab 切换
 function switchTab(tab) {
   activeTab.value = tab;
-  // TODO: 后续接入周/月排行数据
+  loadAllData();
 }
 
-// 启动定时更新
 function startAutoUpdate() {
   stopAutoUpdate();
   updateInterval.value = setInterval(() => {
-    loadAllData();
+    loadPersonalDuration();
+    loadRankList();
   }, UPDATE_INTERVAL);
 }
 
-// 停止定时更新
 function stopAutoUpdate() {
   if (updateInterval.value) {
     clearInterval(updateInterval.value);
@@ -123,7 +166,6 @@ function stopAutoUpdate() {
   }
 }
 
-// 重新启动自动更新
 function restartAutoUpdate() {
   stopAutoUpdate();
   startAutoUpdate();
@@ -160,45 +202,50 @@ onUnmounted(() => {
 
     <!-- 时间 Tab -->
     <div class="tabs">
-      <button 
-        class="tab" 
-        :class="{ active: activeTab === 'today' }"
-        @click="switchTab('today')"
+      <button
+        v-for="tab in tabOptions"
+        :key="tab.value"
+        class="tab"
+        :class="{ active: activeTab === tab.value }"
+        @click="switchTab(tab.value)"
       >
-        今日
-      </button>
-      <button 
-        class="tab" 
-        :class="{ active: activeTab === 'week' }"
-        @click="switchTab('week')"
-        disabled
-      >
-        本周
-      </button>
-      <button 
-        class="tab" 
-        :class="{ active: activeTab === 'month' }"
-        @click="switchTab('month')"
-        disabled
-      >
-        本月
+        {{ tab.label }}
       </button>
     </div>
 
-    <!-- 日期选择 -->
-    <div class="date-card">
+    <!-- 日期选择（仅今日显示） -->
+    <div v-if="activeTab === 'today'" class="date-card">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
         <line x1="16" y1="2" x2="16" y2="6"/>
         <line x1="8" y1="2" x2="8" y2="6"/>
         <line x1="3" y1="10" x2="21" y2="10"/>
       </svg>
-      <input 
-        type="date" 
-        id="study-date" 
-        v-model="currentDate" 
+      <input
+        type="date"
+        id="study-date"
+        v-model="currentDate"
         @change="loadAllData"
       />
+    </div>
+
+    <!-- 周/月信息卡片 -->
+    <div v-else class="period-info-card">
+      <div class="period-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+          <line x1="16" y1="2" x2="16" y2="6"/>
+          <line x1="8" y1="2" x2="8" y2="6"/>
+          <line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+      </div>
+      <div class="period-text">
+        <span v-if="activeTab === 'week'">本周学习</span>
+        <span v-else>本月学习</span>
+        <span v-if="personalPeriodDuration.start_date" class="period-range">
+          {{ formatDateRange(personalPeriodDuration.start_date, personalPeriodDuration.end_date) }}
+        </span>
+      </div>
     </div>
 
     <!-- 个人学习时长信息卡片 -->
@@ -212,36 +259,71 @@ onUnmounted(() => {
         </div>
         <div class="personal-title">
           <h3>我的学习</h3>
-          <span class="personal-rank" v-if="personalRank">
-            排名第 {{ personalRank }} 名
+          <span class="personal-rank" v-if="personalRank && activeTab === 'today'">
+            今日排名第 {{ personalRank }} 名
           </span>
         </div>
       </div>
 
-      <div v-if="hasPersonalRecord" class="personal-stats">
-        <div class="stat-item main">
-          <span class="stat-value">{{ formattedDuration.value }}</span>
-          <span class="stat-unit">{{ formattedDuration.unit }}</span>
-          <span v-if="formattedDuration.extra" class="stat-extra">{{ formattedDuration.extra }}</span>
-        </div>
-        <div class="stat-item" v-if="personalDuration.beat_percent !== null">
-          <div class="beat-badge">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-            </svg>
-            <span>击败 {{ personalDuration.beat_percent }}%</span>
+      <!-- 今日数据 -->
+      <template v-if="activeTab === 'today'">
+        <div v-if="hasPersonalRecord" class="personal-stats">
+          <div class="stat-item main">
+            <span class="stat-value">{{ formattedDuration.value }}</span>
+            <span class="stat-unit">{{ formattedDuration.unit }}</span>
+            <span v-if="formattedDuration.extra" class="stat-extra">{{ formattedDuration.extra }}</span>
+          </div>
+          <div class="stat-item" v-if="personalDuration.beat_percent !== null">
+            <div class="beat-badge">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+              </svg>
+              <span>击败 {{ personalDuration.beat_percent }}%</span>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div v-else class="empty-personal">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <circle cx="12" cy="12" r="10"/>
-          <polyline points="12,6 12,12 16,14"/>
-        </svg>
-        <p>今日暂无学习记录</p>
-        <router-link to="/study-room" class="go-study">去自习室学习</router-link>
-      </div>
+        <div v-else class="empty-personal">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12,6 12,12 16,14"/>
+          </svg>
+          <p>今日暂无学习记录</p>
+          <router-link to="/study-room" class="go-study">去自习室学习</router-link>
+        </div>
+      </template>
+
+      <!-- 周/月数据 -->
+      <template v-else>
+        <div v-if="hasPersonalPeriodRecord" class="personal-stats">
+          <div class="stat-item main">
+            <span class="stat-value">{{ formattedPeriodDuration.value }}</span>
+            <span class="stat-unit">{{ formattedPeriodDuration.unit }}</span>
+            <span v-if="formattedPeriodDuration.extra" class="stat-extra">{{ formattedPeriodDuration.extra }}</span>
+          </div>
+          <div class="stat-item">
+            <div class="days-badge">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                <line x1="16" y1="2" x2="16" y2="6"/>
+                <line x1="8" y1="2" x2="8" y2="6"/>
+                <line x1="3" y1="10" x2="21" y2="10"/>
+              </svg>
+              <span>学习 {{ personalPeriodDuration.days_count || 0 }} 天</span>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="empty-personal">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12,6 12,12 16,14"/>
+          </svg>
+          <p v-if="activeTab === 'week'">本周暂无学习记录</p>
+          <p v-else>本月暂无学习记录</p>
+          <router-link to="/study-room" class="go-study">去自习室学习</router-link>
+        </div>
+      </template>
     </div>
 
     <!-- 排行榜列表 -->
@@ -493,6 +575,57 @@ h2 {
 .date-card input:focus {
   outline: none;
   box-shadow: none;
+}
+
+/* 周/月信息卡片 */
+.period-info-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: #fff;
+  border: 1px solid var(--color-border, #e6eaf2);
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+
+.period-icon {
+  width: 36px;
+  height: 36px;
+  background: var(--color-primary-bg, #e8f5e9);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-primary, #2d6a4f);
+}
+
+.period-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.period-text span:first-child {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text, #1c2533);
+}
+
+.period-range {
+  font-size: 12px;
+  color: var(--color-text-muted, #6b7280);
+}
+
+.days-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 30px;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 /* 个人卡片 */

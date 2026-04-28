@@ -1,6 +1,5 @@
 <script setup>
 import { useRoute, useRouter } from 'vue-router';
-import PrivacyMode from '../components/PrivacyMode.vue';
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { getToken } from '../utils/auth';
 import * as studyRoomApi from '../api/studyRoom';
@@ -16,18 +15,13 @@ const route = useRoute();
 const router = useRouter();
 const ui = useUiStore();
 
+// 标志：组件是否已挂载
+let isMounted = false;
+
 // UI state
 const leaveLoading = ref(false);
 const isLeaving = ref(false);
-const videoRef = ref(null);
-const canvasRef = ref(null);
-const privacyMode = ref('off');
 const currentUserId = ref(localStorage.getItem('user_id'));
-const privacyModes = [
-  { value: 'blur', label: '模糊模式' },
-  { value: 'hand', label: '手部遮挡模式' },
-  { value: 'off', label: '关闭隐私模式' }
-];
 const videoVisible = ref(true);
 
 const showThemeDialog = ref(false);
@@ -35,8 +29,6 @@ const newTheme = ref('');
 const updatingTheme = ref(false);
 const showDestroyDialog = ref(false);
 const destroying = ref(false);
-const showDurationDialog = ref(false);
-const studyDuration = ref(0);
 
 // time
 const joinTime = ref(Date.now());
@@ -59,28 +51,44 @@ const {
 } = useRoomData();
 
 // camera composable
-const {
-  localStream,
-  cameraOn,
-  cameraError,
-  cameraLoading,
-  initCamera,
-  stopCamera,
-  applyPrivacyMode,
-} = useCamera(videoRef, canvasRef, privacyMode);
+const camera = useCamera();
 
 // signaling (websocket + webRTC)
-const { videoStreams, peerConnections, connectRoom, closeRoom, sendSignal, cleanupPeerConnections } = useRoomSignaling(() => localStream.value);
+const { videoStreams, peerConnections, connectRoom, closeRoom, sendSignal, cleanupPeerConnections } = useRoomSignaling(() => camera.localStream.value);
+
+// 房间关闭时的处理函数
+async function handleRoomClosed() {
+  if (isLeaving.value) return;
+  isLeaving.value = true;
+  ai.stop();
+  stopPolling();
+  // camera.stopCamera(); // 暂时禁用
+  // closeRoom(); // 暂时禁用
+  // cleanupPeerConnections(); // 暂时禁用
+  try {
+    const res = await leaveRoom(route.params.id);
+    const data = res.data;
+    if (data.code === 200) {
+      ui.setPendingDuration({ duration: data.data.study_duration_minutes || 0, type: 'room_closed' });
+    } else {
+      ui.setPendingDuration({ duration: 0, type: 'room_closed' });
+    }
+  } catch (e) {
+    console.error('handleRoomClosed error', e);
+    ui.setPendingDuration({ duration: 0, type: 'room_closed' });
+  }
+  router.push('/study-room');
+}
 
 // AI detection (will call onLeave when no person detected)
 const ai = useAiDetection({
-  videoRef,
+  videoRef: camera.videoRef,
   enabled: true,
-  intervalMs: 63000,
+  intervalMs: 13000,
   detectFn: studyRoomApi.detectPerson,
   roomIdGetter: () => route.params.id,
   userIdGetter: () => currentUserId.value,
-  onNoPerson: async () => { await onLeave(); },
+  onNoPerson: async () => { await onLeave('ai_detect'); },
 });
 
 // computed
@@ -115,27 +123,41 @@ const userDuration = computed(() => {
 const joinTimeStr = computed(() => new Date(joinTime.value).toLocaleString());
 const createTimeStr = computed(() => (roomInfo.value.created_ts_ms ? new Date(parseInt(roomInfo.value.created_ts_ms)).toLocaleString() : '未知'));
 
-function toggleVideo() { videoVisible.value = !videoVisible.value; }
-function changePrivacyMode(mode) { privacyMode.value = mode; applyPrivacyMode(); }
+function getAiStatusClass(result, detecting, consecutiveCount) {
+  if (detecting) return 'ai-detecting';
+  if (!result) return 'ai-no-data';
+  if (consecutiveCount >= 3) return 'ai-no-person';
+  return result.hasPerson ? 'ai-detected' : 'ai-warning';
+}
 
-async function onLeave() {
+function getAiStatusText(result, detecting, consecutiveCount) {
+  if (detecting) return '检测中';
+  if (!result) return '未检测';
+  if (consecutiveCount >= 3) return '无人';
+  return result.hasPerson ? '有人' : '检测中';
+}
+
+function changePrivacyMode(mode) { camera.changePrivacyMode(mode); }
+
+async function onLeave(type = 'leave') {
   if (isLeaving.value) return;
   isLeaving.value = true;
   const roomId = route.params.id;
   leaveLoading.value = true;
   try {
     ai.stop();
+    camera.stopCamera();
     stopPolling();
-    stopCamera();
     const res = await leaveRoom(roomId);
     const data = res.data;
     if (data.code !== 200) {
       ui.showToast(data.msg || '退出失败');
+      isLeaving.value = false;
       return;
     }
-    studyDuration.value = data.data.study_duration;
-    showDurationDialog.value = true;
-    setTimeout(() => router.push('/study-room'), 3000);
+    const duration = data.data.study_duration_minutes || data.data.study_duration || 0;
+    ui.setPendingDuration({ duration, type });
+    router.push('/study-room');
   } catch (e) {
     ui.showToast(e.response?.data?.msg || e.message || '退出失败');
   } finally {
@@ -175,8 +197,17 @@ async function destroyRoom() {
     const { data } = await destroyRoomApi(route.params.id);
     console.debug('[StudyRoomDetail] destroyRoom: response', data);
     if (data.code === 200) {
-      stopCamera();
-      ui.showToast('房间已销毁');
+      ai.stop();
+      camera.stopCamera();
+      closeRoom();
+      cleanupPeerConnections();
+      const allUsers = data.data.users || [];
+      const myDuration = allUsers.find(u => u.user_id === currentUserId.value);
+      ui.setPendingDuration({
+        duration: myDuration?.study_duration_minutes || 0,
+        type: 'destroy',
+        allUsers: allUsers
+      });
       router.push('/study-room');
     } else ui.showToast(data.msg || '销毁失败');
   } catch (e) {
@@ -196,92 +227,61 @@ async function fetchCurrentUserInfo() {
   } catch (e) { console.error('获取当前用户信息失败:', e); }
 }
 
-// beforeunload handler
-async function handleBeforeUnload() {
-  try {
-    const roomId = route.params.id;
-    const token = getToken();
-    if (!roomId) return;
-    
-    // 停止所有组件
-    stopPolling();
-    stopCamera();
-    closeRoom();
-    cleanupPeerConnections();
-    
-    // 使用同步XMLHttpRequest确保请求能发送出去
-    try {
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', '/api/room/leave', false); // 同步请求
-      xhr.setRequestHeader('Content-Type', 'application/json');
-      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-      xhr.send(JSON.stringify({ room_id: roomId }));
-    } catch (err) {
-      console.error('同步离开请求失败:', err);
-      // 备用方案：使用navigator.sendBeacon
-      try {
-        const blob = new Blob([JSON.stringify({ room_id: roomId })], { type: 'application/json' });
-        navigator.sendBeacon('/api/room/leave', blob);
-      } catch (beaconErr) {
-        console.error('sendBeacon也失败:', beaconErr);
-      }
-    }
-  } catch (err) {
-    console.error('beforeunload处理错误:', err);
+// pagehide handler - 由于无法可靠地区分刷新和关闭标签页
+// 我们选择不发送 leave 请求，依赖后端超时机制来清理用户
+function handlePageHide(event) {
+  console.log('[pagehide] 触发, persisted=', event.persisted, 'isMounted=', isMounted);
+  if (!isMounted) {
+    console.log('[pagehide] 组件已卸载，跳过清理');
+    return;
   }
+  // 停止所有组件
+  stopPolling();
+  camera.stopCamera();
+  closeRoom();
+  cleanupPeerConnections();
+  console.log('[pagehide] 组件已清理');
+  // 不再发送 leave 请求，依赖后端超时机制
 }
 
 onMounted(async () => {
+  isMounted = true;
+  console.log('[onMounted] 组件挂载');
+
+  // 立即启动计时器，不依赖摄像头
+  timer.value = setInterval(() => { currentTime.value = Date.now(); }, 1000);
+
   await fetchCurrentUserInfo();
   const res = await fetchRoomInfo(route.params.id);
   if (res && res.closed) { ui.showToast('房间已关闭'); router.push('/study-room'); return; }
-  await initCamera();
+  await camera.initCamera();
 
   // init signaling (websocket + webRTC)
   const roomId = route.params.id;
   const userId = currentUserId.value;
-  connectRoom(roomId, userId, { onError: (e) => console.error(e) });
+  connectRoom(roomId, userId, { onError: (e) => console.error(e), onRoomClosed: handleRoomClosed });
 
-  timer.value = setInterval(() => { currentTime.value = Date.now(); }, 1000);
-
-  // start polling with callback
-  startPolling(route.params.id, 5000, () => {
-    if (isLeaving.value) return;
-    ui.showToast('房间已关闭，返回房间列表');
-    stopCamera();
-    closeRoom();
-    cleanupPeerConnections();
-    router.push('/study-room');
-  });
+  // start polling with callback - 当检测到房间关闭时跳转
+  startPolling(route.params.id, 5000, handleRoomClosed, () => isLeaving.value);
 
   ai.start();
-  
-  // 添加页面可见性变化监听
-  document.addEventListener('visibilitychange', handleVisibilityChange);
-  
-  // 添加beforeunload事件监听
-  window.addEventListener('beforeunload', handleBeforeUnload);
+
+  // 添加pagehide事件监听 - 用于组件清理
+  window.addEventListener('pagehide', handlePageHide);
 });
 
-// 页面可见性变化处理
-function handleVisibilityChange() {
-  if (document.visibilityState === 'hidden') {
-    // 页面隐藏时（如切换到其他标签页），发送离开请求
-    handleBeforeUnload();
-  }
-}
-
 onUnmounted(() => {
+  isMounted = false;
+  console.log('[onUnmounted] 组件卸载');
   if (timer.value) clearInterval(timer.value);
   ai.stop();
   closeRoom();
   cleanupPeerConnections();
   stopPolling();
-  try { 
-    document.removeEventListener('visibilitychange', handleVisibilityChange);
-    window.removeEventListener('beforeunload', handleBeforeUnload); 
+  try {
+    window.removeEventListener('pagehide', handlePageHide);
   } catch (err) {}
-  stopCamera();
+  camera.stopCamera();
 });
 </script>
 
@@ -290,7 +290,6 @@ onUnmounted(() => {
     <header class="bar">
       <h2>房间 {{ route.params.id }}</h2>
     </header>
-    <PrivacyMode label="隐私模式与伴学能力在后续迭代接入。" />
 
     <!-- 房间信息区域 -->
     <div class="card">
@@ -303,7 +302,6 @@ onUnmounted(() => {
         <p class="info-time"><strong>创建时间</strong><span>{{ createTimeStr }}</span></p>
         <p class="info-time"><strong>持续时间</strong><span>{{ roomDuration }}</span></p>
         <p class="info-time"><strong>加入时间</strong><span>{{ joinTimeStr }}</span></p>
-        <p class="info-duration"><strong>学习时长</strong><span class="highlight">{{ userDuration }}</span></p>
         <!-- 显示房间内所有用户 -->
         <p class="info-members"><strong>房间成员</strong></p>
         <div class="room-users">
@@ -325,40 +323,74 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 摄像头显示区域 -->
+    <!-- 我的状态区域（与摄像头解耦） -->
     <div class="card">
-      <h3>摄像头</h3>
-      <div class="camera-controls">
-        <div class="privacy-mode-selector">
-          <label>隐私模式：</label>
-          <select v-model="privacyMode" @change="changePrivacyMode(privacyMode)">
-            <option v-for="mode in privacyModes" :key="mode.value" :value="mode.value">
-              {{ mode.label }}
-            </option>
-          </select>
+      <h3>我的状态</h3>
+      <div class="my-status">
+        <!-- AI检测状态 -->
+        <div class="ai-status-card">
+          <div class="ai-status-header">
+            <span class="ai-status-label">AI离席检测</span>
+            <span class="ai-status-badge" :class="getAiStatusClass(ai.lastDetectionResult.value, ai.isDetecting.value, ai.consecutiveNoPersonCount.value)">
+              <span class="ai-status-dot"></span>
+              {{ getAiStatusText(ai.lastDetectionResult.value, ai.isDetecting.value, ai.consecutiveNoPersonCount.value) }}
+            </span>
+          </div>
+          <div class="ai-hint" v-if="ai.consecutiveNoPersonCount.value > 0 && ai.consecutiveNoPersonCount.value < 3">
+            提示：连续 {{ ai.consecutiveNoPersonCount.value }}/3 次检测到无人
+          </div>
+        </div>
+
+        <!-- 学习时长 -->
+        <div class="duration-card">
+          <span class="duration-label">学习时长</span>
+          <span class="duration-value">{{ userDuration }}</span>
+        </div>
+
+        <!-- 隐私模式 -->
+        <div class="camera-status-card">
+          <div class="camera-status-header">
+            <span class="camera-status-label">隐私模式</span>
+            <div class="privacy-mode-selector">
+              <select v-model="camera.privacyMode.value" @change="changePrivacyMode(camera.privacyMode.value)">
+                <option v-for="mode in camera.privacyModes" :key="mode.value" :value="mode.value">
+                  {{ mode.label }}
+                </option>
+              </select>
+            </div>
+          </div>
+          <div v-if="camera.cameraError.value" class="camera-error-text">
+            无法访问摄像头
+            <button class="link-btn" @click="camera.initCamera()">重试</button>
+          </div>
         </div>
       </div>
+    </div>
+
+    <!-- 视频通话区域 -->
+    <div class="card" v-if="videoVisible">
+      <h3>视频通话</h3>
 
       <!-- 多人视频网格 -->
-      <div class="video-grid" :class="videoGridClass" v-if="videoVisible">
+      <div class="video-grid" :class="videoGridClass">
         <!-- 本地视频 -->
-        <div class="video-item" v-if="!cameraError">
+        <div class="video-item" v-if="!camera.cameraError.value">
           <div class="video-header">
             <span>我</span>
           </div>
           <video
-            ref="videoRef"
+            :ref="el => { camera.videoRef.value = el }"
             class="camera-video"
             autoplay
             playsinline
-            :style="{ display: privacyMode === 'off' ? 'block' : 'none' }"
+            :style="{ display: camera.privacyMode.value === 'off' ? 'block' : 'none' }"
           ></video>
           <canvas
-            ref="canvasRef"
+            :ref="el => { camera.canvasRef.value = el }"
             class="camera-canvas"
-            v-if="privacyMode !== 'off'"
+            v-if="camera.privacyMode.value !== 'off'"
           ></canvas>
-          <div class="camera-loading" v-if="cameraLoading">
+          <div class="camera-loading" v-if="camera.cameraLoading.value">
             <p>正在启动摄像头...</p>
           </div>
         </div>
@@ -373,7 +405,7 @@ onUnmounted(() => {
             <span>{{ userInfoMap.get(userId)?.nickname || userId }}</span>
           </div>
           <video
-            :ref="el => { if (el) el.srcObject = stream }"
+            :ref="el => { if (el && stream && stream.getAudioTracks) el.srcObject = stream }"
             class="remote-video"
             autoplay
             playsinline
@@ -381,12 +413,8 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="camera-off" v-if="!cameraError && !videoVisible">
-        <p>视频已隐藏（摄像头仍在运行）</p>
-      </div>
-      <div class="camera-error" v-else-if="cameraError">
-        <p>无法访问摄像头</p>
-        <button class="primary" @click="initCamera">重试</button>
+      <div class="camera-off" v-if="camera.cameraError.value">
+        <p>摄像头不可用</p>
       </div>
     </div>
 
@@ -429,18 +457,6 @@ onUnmounted(() => {
         <div class="dialog-actions">
           <button type="button" class="secondary" @click="closeDestroyDialog">取消</button>
           <button type="button" class="danger" :disabled="destroying" @click="destroyRoom">{{ destroying ? '销毁中...' : '销毁' }}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 学习时长弹窗 -->
-    <div v-if="showDurationDialog" class="dialog-overlay">
-      <div class="dialog">
-        <h3>学习时长</h3>
-        <div class="dialog-content">
-          <p>您在自习室中的学习时长为：</p>
-          <p class="duration-value">{{ studyDuration }} 分钟</p>
-          <p class="muted">3秒后自动返回房间列表</p>
         </div>
       </div>
     </div>
@@ -574,27 +590,6 @@ h3 {
   font-size: 14px;
   color: #1c2533;
   font-weight: 600;
-}
-
-/* 学习时长突出显示 */
-.info-duration {
-  grid-column: 1 / -1;
-  background: #fff3e0;
-  color: #1b4332;
-  border-radius: 14px;
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.info-duration strong {
-  font-size: 13px;
-  opacity: 0.85;
-  font-weight: 500;
-}
-.info-duration .highlight {
-  font-size: 28px;
-  font-weight: 700;
 }
 
 /* 成员标签 */
@@ -850,6 +845,93 @@ h3 {
 .camera-error p {
   margin-bottom: 10px;
 }
+
+/* 我的状态区域 */
+.my-status {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ai-status-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 14px;
+  padding: 16px 20px;
+  color: #fff;
+}
+
+.ai-status-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ai-status-label {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.ai-hint {
+  margin-top: 8px;
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.duration-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #fff3e0;
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+
+.duration-label {
+  font-weight: 500;
+  color: #e65100;
+}
+
+.duration-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #e65100;
+}
+
+.camera-status-card {
+  background: #f5f5f5;
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.camera-status-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.camera-status-header .camera-status-label {
+  font-weight: 500;
+  color: #374151;
+}
+
+.camera-error-text {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #ef4444;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: #3b82f6;
+  cursor: pointer;
+  font-size: 13px;
+  text-decoration: underline;
+}
+
+.link-btn:hover {
+  color: #2563eb;
+}
 .camera-loading {
   position: absolute;
   top: 0;
@@ -921,6 +1003,80 @@ h3 {
   font-size: 12px;
   font-weight: 500;
   z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ai-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ai-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.ai-detecting {
+  background-color: rgba(255, 193, 7, 0.3);
+  color: #ffc107;
+}
+
+.ai-detecting .ai-status-dot {
+  background-color: #ffc107;
+}
+
+.ai-detected {
+  background-color: rgba(76, 175, 80, 0.3);
+  color: #4caf50;
+}
+
+.ai-detected .ai-status-dot {
+  background-color: #4caf50;
+}
+
+.ai-no-person {
+  background-color: rgba(244, 67, 54, 0.3);
+  color: #f44336;
+}
+
+.ai-no-person .ai-status-dot {
+  background-color: #f44336;
+}
+
+.ai-no-data {
+  background-color: rgba(158, 158, 158, 0.3);
+  color: #9e9e9e;
+}
+
+.ai-no-data .ai-status-dot {
+  background-color: #9e9e9e;
+  animation: none;
+}
+
+.ai-warning {
+  background-color: rgba(255, 152, 0, 0.3);
+  color: #ff9800;
+}
+
+.ai-warning .ai-status-dot {
+  background-color: #ff9800;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.2); }
 }
 
 .camera-video, .remote-video, .camera-canvas {
@@ -944,5 +1100,35 @@ p {
   color: #2d6a4f;
   text-align: center;
   margin: 16px 0;
+}
+
+.users-duration-list {
+  max-height: 300px;
+  overflow-y: auto;
+  margin: 16px 0;
+  border: 1px solid var(--color-border, #e6eaf2);
+  border-radius: 12px;
+}
+
+.user-duration-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border, #e6eaf2);
+}
+
+.user-duration-item:last-child {
+  border-bottom: none;
+}
+
+.user-duration-name {
+  font-weight: 500;
+  color: var(--color-text, #1c2533);
+}
+
+.user-duration-value {
+  font-weight: 700;
+  color: #2d6a4f;
 }
 </style>

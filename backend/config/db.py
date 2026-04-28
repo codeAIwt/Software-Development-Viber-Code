@@ -34,5 +34,6 @@ def init_db():
     from models.study_room import StudyRoom  # noqa: F401
     from models.room_user import RoomUser  # noqa: F401
     from models.study_duration import StudyDuration  # noqa: F401
+    from models.check_in import CheckIn  # noqa: F401
 
     Base.metadata.create_all(bind=engine)

@@ -82,11 +82,20 @@ def update_nickname(db: Session, user: User, nickname: str) -> User:
 
 
 def update_tags(db: Session, user: User, tags: list) -> User:
-    # 将标签列表转换为逗号分隔的字符串
     tags_str = ",".join(tags)
     if len(tags_str) > 255:
         raise UserServiceError(400, "标签长度超出限制")
     user.tags = tags_str
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def update_avatar(db: Session, user: User, avatar_url: str) -> User:
+    if not avatar_url or len(avatar_url) > 255:
+        raise UserServiceError(400, "头像URL格式不合法")
+    user.avatar = avatar_url
     db.add(user)
     db.commit()
     db.refresh(user)

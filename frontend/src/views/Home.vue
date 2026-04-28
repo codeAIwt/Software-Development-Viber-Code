@@ -71,19 +71,32 @@ function animateNumber(target, duration = 1000) {
 async function load() {
   loading.value = true;
   try {
-    const [profileRes, durationRes] = await Promise.all([
+    const [profileRes, durationRes, monthlyRankRes] = await Promise.all([
       userApi.fetchProfile(),
-      durationApi.getDailyDuration(new Date().toISOString().split("T")[0]).catch(() => null)
+      durationApi.getDailyDuration(new Date().toISOString().split("T")[0]).catch(() => null),
+      durationApi.getMonthlyRankList().catch(() => null)
     ]);
-    
+
     if (profileRes.data.code === 200) {
       profile.value = profileRes.data.data;
     }
-    
+
     if (durationRes?.data?.code === 200) {
       todayDuration.value = durationRes.data.data.total_minutes || 0;
-      beatPercent.value = durationRes.data.data.beat_percent;
       animateNumber(todayDuration.value);
+    }
+
+    console.log('[Home] monthlyRankRes:', monthlyRankRes);
+    console.log('[Home] profileRes.data.data:', profileRes.data?.data);
+
+    if (monthlyRankRes?.data?.code === 200 && monthlyRankRes.data.data.length > 0) {
+      const userId = profileRes.data?.data?.user_id;
+      const userRankItem = monthlyRankRes.data.data.find(item => item.user_id === userId);
+      console.log('[Home] userRankItem:', userRankItem);
+      if (userRankItem) {
+        beatPercent.value = userRankItem.beat_percent;
+        console.log('[Home] beatPercent set to:', userRankItem.beat_percent);
+      }
     }
   } catch {
     ui.showToast("加载用户信息失败");

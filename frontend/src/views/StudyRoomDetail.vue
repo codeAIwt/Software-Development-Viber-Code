@@ -10,6 +10,7 @@ import { useCamera } from '../composables/useCamera';
 import { useRoomData } from '../composables/useRoomData';
 import { useAiDetection } from '../composables/useAiDetection';
 import { useRoomSignaling } from '../composables/useRoomSignaling';
+import BookmarkPanel from '../components/BookmarkPanel.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -25,6 +26,7 @@ const currentUserId = ref(localStorage.getItem('user_id'));
 const videoVisible = ref(true);
 
 const showThemeDialog = ref(false);
+const showBookmark = ref(false);
 const newTheme = ref('');
 const updatingTheme = ref(false);
 const showDestroyDialog = ref(false);
@@ -460,6 +462,25 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- 收藏夹悬浮按钮 -->
+    <button class="bookmark-float-btn" @click="showBookmark = !showBookmark" title="收藏夹">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+      </svg>
+      <span class="bookmark-btn-text">收藏</span>
+    </button>
+
+    <!-- 收藏夹悬浮面板 -->
+    <div v-if="showBookmark" class="bookmark-float-panel">
+      <div class="bookmark-panel-header">
+        <span>收藏夹</span>
+        <button class="close-panel-btn" @click="showBookmark = false">&times;</button>
+      </div>
+      <div class="bookmark-panel-body">
+        <BookmarkPanel v-model="showBookmark" mode="float" />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -477,6 +498,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 12px;
 }
+
 h2 {
   margin: 0;
   font-size: 22px;
@@ -1130,5 +1152,81 @@ p {
 .user-duration-value {
   font-weight: 700;
   color: #2d6a4f;
+}
+
+/* 收藏夹悬浮按钮 */
+.bookmark-float-btn {
+  position: fixed;
+  bottom: 80px;
+  left: 30px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: #fff;
+  border: none;
+  border-radius: 24px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+  transition: all 0.2s;
+  z-index: 100;
+}
+
+.bookmark-float-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.5);
+}
+
+.bookmark-btn-text {
+  font-size: 14px;
+}
+
+/* 收藏夹悬浮面板 */
+.bookmark-float-panel {
+  position: fixed;
+  bottom: 140px;
+  left: 30px;
+  width: 380px;
+  max-height: 60vh;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  z-index: 101;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.bookmark-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e6eaf2;
+  font-weight: 600;
+  font-size: 15px;
+  color: #1c2533;
+}
+
+.close-panel-btn {
+  background: none;
+  border: none;
+  font-size: 22px;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.close-panel-btn:hover {
+  color: #6b7280;
+}
+
+.bookmark-panel-body {
+  flex: 1;
+  overflow-y: auto;
 }
 </style>

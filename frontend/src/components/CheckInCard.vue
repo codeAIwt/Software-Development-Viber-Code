@@ -66,6 +66,18 @@ onMounted(loadStatus);
       </div>
     </div>
 
+    <div class="stats-row">
+      <div class="stat-item">
+        <span class="stat-value">{{ checkInStatus?.total_days || 0 }}</span>
+        <span class="stat-label">已打卡天数</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-value">{{ checkInStatus?.consecutive_days || 0 }}</span>
+        <span class="stat-label">连续打卡天数</span>
+      </div>
+    </div>
+
     <button
       class="checkin-btn"
       :class="{ 'checked': checkInStatus?.checked_in_today }"
@@ -155,6 +167,41 @@ onMounted(loadStatus);
 
 .calendar-day.checked .day-text {
   color: #fff;
+}
+
+.stats-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #f8fafc;
+  border-radius: 10px;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1c2533;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.stat-divider {
+  width: 1px;
+  height: 40px;
+  background: #e5e7eb;
 }
 
 .checkin-btn {

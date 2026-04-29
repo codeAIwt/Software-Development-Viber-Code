@@ -57,9 +57,27 @@ def get_check_in_status(db: Session, user_id: str) -> dict:
     ).all()
     checked_dates = set(r.check_in_date for r in week_records)
 
+    all_records = db.query(CheckIn).filter(
+        CheckIn.user_id == user_id
+    ).order_by(CheckIn.check_in_date.desc()).all()
+
+    total_days = len(all_records)
+
+    consecutive_days = 0
+    check_dates = set(r.check_in_date for r in all_records)
+    current_date = today
+    if current_date not in check_dates:
+        current_date = today - timedelta(days=1)
+
+    while current_date in check_dates:
+        consecutive_days += 1
+        current_date = current_date - timedelta(days=1)
+
     return {
         "checked_in_today": existing is not None,
         "check_in_date": today.isoformat() if existing else None,
+        "total_days": total_days,
+        "consecutive_days": consecutive_days,
         "week_calendar": [
             {
                 "date": d.isoformat(),

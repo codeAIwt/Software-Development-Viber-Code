@@ -7,6 +7,7 @@ import { clearToken } from "../utils/auth";
 import { useUiStore } from "../store";
 import CheckInCard from "../components/CheckInCard.vue";
 import EditAvatar from "../components/EditAvatar.vue";
+import BookmarkPanel from "../components/BookmarkPanel.vue";
 
 const router = useRouter();
 const ui = useUiStore();
@@ -15,6 +16,7 @@ const nicknameDraft = ref("");
 const saving = ref(false);
 const showTagsDialog = ref(false);
 const showAvatarDialog = ref(false);
+const showBookmark = ref(false);
 const selectedTags = ref([]);
 const loading = ref(true);
 
@@ -346,6 +348,16 @@ async function saveTags() {
         <CheckInCard />
       </section>
 
+      <!-- 收藏夹 -->
+      <section class="bookmark-section animate-item">
+        <button class="btn-bookmark" @click="showBookmark = true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+          </svg>
+          我的收藏
+        </button>
+      </section>
+
       <!-- 退出登录 -->
       <section class="logout-section animate-item">
         <button class="btn-logout" @click="onLogout">
@@ -404,6 +416,9 @@ async function saveTags() {
       :current-avatar="profile?.avatar"
       @avatar-updated="handleAvatarUpdated"
     />
+
+    <!-- 收藏夹弹窗 -->
+    <BookmarkPanel v-model="showBookmark" />
   </div>
 </template>
 
@@ -861,6 +876,33 @@ h2 {
 
 .arrow {
   color: var(--color-text-muted, #6b7280);
+}
+
+/* 收藏夹 */
+.bookmark-section {
+  padding-top: 8px;
+}
+
+.btn-bookmark {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--color-primary, #3b82f6);
+  border-radius: 14px;
+  background: #fff;
+  color: var(--color-primary, #3b82f6);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-bookmark:hover {
+  background: var(--color-primary, #3b82f6);
+  color: #fff;
 }
 
 /* 退出登录 */

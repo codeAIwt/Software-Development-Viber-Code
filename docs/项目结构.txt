@@ -1,73 +1,95 @@
 project/
 ├── frontend/                # 前端Vue项目
+│   ├── package.json         # 前端依赖配置
+│   ├── vite.config.js      # Vite构建配置
 │   ├── public/
 │   ├── src/
-│   │   ├── api/
-│   │   │   ├── user.js       # 用户注册/登录/信息
-│   │   │   ├── studyRoom.js  # 自习室创建/加入/列表
-│   │   │   ├── duration.js   # 时长/排行榜接口
+│   │   ├── main.js         # 应用入口
+│   │   ├── App.vue         # 根组件
+│   │   ├── api/            # API调用层
+│   │   │   ├── client.js   # Axios实例配置
+│   │   │   ├── user.js    # 用户相关API
+│   │   │   ├── studyRoom.js # 自习室相关API
+│   │   │   ├── duration.js # 学习时长相关API
+│   │   │   └── bookmark.js # 收藏夹相关API
 │   │   ├── assets/
-│   │   ├── components/
-│   │   │   ├── CommonToast.vue
-│   │   │   ├── PrivacyMode.vue
-│   │   │   ├── StudyRoomList.vue
-│   │   ├── router/
+│   │   │   └── base.css   # 基础样式
+│   │   ├── components/     # 公共组件
+│   │   │   ├── CommonToast.vue    # 通用提示组件
+│   │   │   ├── PrivacyMode.vue   # 隐私模式组件
+│   │   │   ├── StudyRoomList.vue  # 自习室列表组件
+│   │   │   ├── BookmarkPanel.vue # 收藏夹面板组件
+│   │   │   ├── CheckInCard.vue   # 打卡卡片组件
+│   │   │   └── EditAvatar.vue    # 头像编辑组件
+│   │   ├── views/          # 页面视图
+│   │   │   ├── Login.vue          # 登录页面
+│   │   │   ├── Register.vue       # 注册页面
+│   │   │   ├── Home.vue          # 首页
+│   │   │   ├── Personal.vue       # 个人中心页面
+│   │   │   ├── Tags.vue          # 标签选择页面
+│   │   │   ├── StudyRoom.vue      # 自习室列表页面
+│   │   │   ├── StudyRoomDetail.vue # 自习室详情页面
+│   │   │   └── Rank.vue          # 排行榜页面
+│   │   ├── composables/     # 组合式函数（逻辑复用）
+│   │   │   ├── useCamera.js       # 摄像头管理
+│   │   │   ├── useWebSocket.js    # WebSocket连接管理
+│   │   │   ├── useWebRTC.js       # WebRTC视频通信
+│   │   │   ├── useRoomData.js     # 房间数据轮询与状态管理
+│   │   │   ├── useAiDetection.js  # AI检测逻辑封装
+│   │   │   └── useRoomSignaling.js # 房间信令通信管理
+│   │   ├── router/          # 路由配置
 │   │   │   └── index.js
-│   │   ├── store/
-│   │   ├── composables/     # 复用的 composition 函数
-│   │   │   ├── useCamera.js
-│   │   │   ├── useWebSocket.js
-│   │   │   ├── useWebRTC.js
-│   │   │   ├── useRoomData.js
-│   │   │   ├── useAiDetection.js
-│   │   │   └── useRoomSignaling.js
-│   │   ├── utils/
-│   │   │   ├── auth.js
-│   │   │   ├── video.js
-│   │   │   ├── calc.js
-│   │   ├── views/
-│   │   │   ├── Login.vue
-│   │   │   ├── Register.vue
-│   │   │   ├── Home.vue
-│   │   │   ├── Personal.vue
-│   │   │   ├── StudyRoom.vue
-│   │   │   ├── StudyRoomDetail.vue
-│   │   │   ├── Tags.vue
-│   │   ├── App.vue
-│   │   └── main.js
-│   └── package.json
+│   │   ├── store/           # Pinia状态管理
+│   │   │   └── index.js
+│   │   └── utils/           # 工具函数
+│   │       ├── auth.js      # 认证工具
+│   │       ├── video.js     # 视频处理工具
+│   │       └── calc.js      # 计算工具
+│   └── dist/                # 构建输出目录
 ├── backend/
-│   ├── config/
-│   │   ├── db.py
-│   │   ├── ws.py
-│   │   └── settings.py
-│   ├── controllers/
-│   │   ├── user_controller.py
-│   │   ├── room_controller.py
-│   │   ├── duration_controller.py
-│   ├── models/
-│   │   ├── user.py
-│   │   ├── study_duration.py
-│   │   ├── study_room.py
-│   │   └── room_user.py
-│   ├── schedule/
-│   │   └── duration_schedule.py
-│   ├── services/
-│   │   ├── user_service.py
-│   │   ├── room_service.py
-│   │   ├── duration_service.py
-│   │   └── ai_service.py        # AI检测服务
-│   ├── utils/
-│   │   ├── auth.py
-│   │   ├── cache.py
-│   │   └── ws_client.py
-│   ├── ws/
-│   │   └── server.py
-│   ├── app.py
-│   ├── requirements.txt
-│   └── AI检测.md               # AI检测配置与使用指南
+│   ├── app.py               # 应用入口，FastAPI应用创建
+│   ├── requirements.txt     # Python依赖
+│   ├── config/              # 配置模块
+│   │   ├── __init__.py
+│   │   ├── db.py           # 数据库配置与初始化
+│   │   ├── settings.py     # 应用配置（JWT、Redis等）
+│   │   └── ws.py           # WebSocket配置
+│   ├── controllers/         # 控制器层（API路由）
+│   │   ├── __init__.py
+│   │   ├── user_controller.py    # 用户相关接口
+│   │   ├── room_controller.py    # 自习室相关接口
+│   │   ├── duration_controller.py # 学习时长相关接口
+│   │   └── bookmark_controller.py # 收藏夹相关接口
+│   ├── services/            # 业务逻辑层
+│   │   ├── __init__.py
+│   │   ├── user_service.py      # 用户业务逻辑
+│   │   ├── room_service.py      # 自习室业务逻辑
+│   │   ├── duration_service.py   # 学习时长业务逻辑
+│   │   ├── bookmark_service.py   # 收藏夹业务逻辑
+│   │   ├── check_in_service.py   # 打卡业务逻辑
+│   │   └── ai_service.py        # AI检测服务（OpenCV）
+│   ├── models/              # 数据模型层
+│   │   ├── __init__.py
+│   │   ├── user.py              # 用户模型
+│   │   ├── study_room.py        # 自习室模型
+│   │   ├── room_user.py         # 自习室成员模型
+│   │   ├── study_duration.py   # 学习时长模型
+│   │   ├── bookmark.py          # 收藏夹模型
+│   │   └── check_in.py          # 打卡记录模型
+│   ├── utils/               # 工具函数
+│   │   ├── __init__.py
+│   │   ├── auth.py              # JWT认证与权限验证
+│   │   ├── cache.py             # Redis缓存操作封装
+│   │   └── ws_client.py         # WebSocket客户端管理
+│   ├── ws/                  # WebSocket服务
+│   │   ├── __init__.py
+│   │   └── server.py            # WebSocket消息广播逻辑
+│   ├── schedule/            # 定时任务
+│   │   ├── __init__.py
+│   │   └── duration_schedule.py  # 学习时长定时记录
+│   └── test_integration_strict.py # 集成测试脚本
 └── docs/
-    └── online-study-prd.md
+    └── online-study-prd.md  # 产品需求文档
 
 ## 核心功能模块说明
 
@@ -75,81 +97,139 @@ project/
 
 #### 用户系统模块
 - **Login.vue / Register.vue**: 用户登录注册页面
-- **Personal.vue**: 个人信息管理页面
+- **Personal.vue**: 个人信息管理页面（昵称、头像、标签）
 - **Tags.vue**: 标签选择页面（首次登录）
+- **CheckInCard.vue**: 每日打卡卡片组件
 
 #### 自习室管理模块
 - **Home.vue**: 首页，显示自习室列表和创建入口
 - **StudyRoom.vue**: 自习室列表页面
 - **StudyRoomDetail.vue**: 自习室详情页面，包含实时通信和AI检测
 
+#### 收藏夹模块
+- **BookmarkPanel.vue**: 收藏夹面板组件，支持添加、筛选、删除收藏
+
 #### 组件库
 - **CommonToast.vue**: 通用提示组件
 - **PrivacyMode.vue**: 隐私模式切换组件
 - **StudyRoomList.vue**: 自习室列表展示组件
+- **EditAvatar.vue**: 头像编辑组件
 
 #### Composables（逻辑复用）
 - **useCamera.js**: 摄像头访问和管理逻辑
-- **useWebSocket.js**: WebSocket 连接管理
-- **useWebRTC.js**: WebRTC 视频通信（预留扩展）
+- **useWebSocket.js**: WebSocket连接管理
+- **useWebRTC.js**: WebRTC视频通信（预留扩展）
 - **useRoomData.js**: 房间数据轮询和状态管理
-- **useAiDetection.js**: AI 检测逻辑封装
+- **useAiDetection.js**: AI检测逻辑封装
 - **useRoomSignaling.js**: 房间信令通信管理
 
-#### API 接口层
-- **user.js**: 用户相关 API 调用
-- **studyRoom.js**: 自习室相关 API 调用
-- **duration.js**: 学习时长相关 API 调用
+#### API接口层
+- **client.js**: Axios实例配置
+- **user.js**: 用户相关API调用
+- **studyRoom.js**: 自习室相关API调用
+- **duration.js**: 学习时长相关API调用
+- **bookmark.js**: 收藏夹相关API调用
 
 ### 后端功能模块
 
 #### 控制器层 (Controllers)
-- **user_controller.py**: 用户注册、登录、信息管理接口
-- **room_controller.py**: 自习室创建、加入、管理接口
-- **duration_controller.py**: 学习时长统计接口
+- **user_controller.py**: 用户注册、登录、信息管理、每日打卡接口
+- **room_controller.py**: 自习室创建、加入、管理、AI人脸检测接口
+- **duration_controller.py**: 学习时长统计、日/周/月排行榜接口
+- **bookmark_controller.py**: 收藏夹增删改查接口
 
 #### 服务层 (Services)
 - **user_service.py**: 用户业务逻辑处理
 - **room_service.py**: 自习室业务逻辑处理
 - **duration_service.py**: 学习时长业务逻辑处理
-- **ai_service.py**: AI 检测服务接口
+- **bookmark_service.py**: 收藏夹业务逻辑处理
+- **check_in_service.py**: 打卡业务逻辑处理
+- **ai_service.py**: AI检测服务接口（OpenCV Haar Cascade）
 
 #### 数据模型层 (Models)
 - **user.py**: 用户数据模型
 - **study_room.py**: 自习室数据模型
 - **room_user.py**: 房间用户关系模型
 - **study_duration.py**: 学习时长数据模型
+- **bookmark.py**: 收藏夹数据模型
+- **check_in.py**: 打卡记录数据模型
 
 #### 工具层 (Utils)
-- **auth.py**: JWT 认证和权限验证
-- **cache.py**: Redis 缓存操作封装
-- **ws_client.py**: WebSocket 客户端管理
+- **auth.py**: JWT认证和权限验证
+- **cache.py**: Redis缓存操作封装（房间元信息、成员集合、活跃用户检查等）
+- **ws_client.py**: WebSocket客户端管理
 
-#### WebSocket 服务
-- **server.py**: WebSocket 连接管理和消息广播
+#### WebSocket服务
+- **server.py**: WebSocket连接管理和消息广播（连接管理、信令转发）
 
 #### 配置层 (Config)
-- **db.py**: 数据库连接配置
-- **settings.py**: 应用配置管理
-- **ws.py**: WebSocket 配置
+- **db.py**: 数据库连接配置（支持MySQL/SQLite）
+- **settings.py**: 应用配置管理（JWT、Redis、环境变量）
+- **ws.py**: WebSocket配置
 
-## 数据流说明
+#### 定时任务 (Schedule)
+- **duration_schedule.py**: 学习时长定时记录任务
 
-### 用户操作流程
-1. 用户注册/登录 → 用户认证 → 进入首页
-2. 创建/加入自习室 → 房间状态更新 → 进入自习室详情
-3. 开启摄像头 → AI 检测启动 → 学习时长记录
-4. 离开自习室 → 时长统计 → 状态同步
+## API接口总览
 
-### 实时通信流程
-1. WebSocket 连接建立 → 房间状态订阅
-2. 用户加入/离开 → 消息广播 → 界面更新
-3. AI 检测状态 → 实时通知 → 用户状态更新
+### 用户接口 `/api/user`
+- POST /api/user/register - 用户注册
+- POST /api/user/login - 用户登录
+- POST /api/user/logout - 用户退出
+- GET /api/user/profile - 获取用户信息
+- PUT /api/user/profile/nickname - 更新昵称
+- PUT /api/user/profile/tags - 更新标签
+- PUT /api/user/profile/avatar - 更新头像
+- GET /api/user/tags - 获取系统标签
+- GET /api/user/info/{user_id} - 获取指定用户信息
+- POST /api/user/check-in - 每日打卡
+- GET /api/user/check-in/status - 获取打卡状态
 
-### 数据持久化流程
-1. 用户操作 → API 调用 → 数据库操作
-2. 房间状态 → Redis 缓存 → 实时同步
-3. 学习时长 → 定时记录 → 数据库存储
+### 自习室接口 `/api/room`
+- POST /api/room/create - 创建自习室
+- GET /api/room/list - 列出空闲自习室
+- POST /api/room/join - 加入自习室
+- POST /api/room/leave - 离开自习室
+- GET /api/room/info/{room_id} - 获取房间信息
+- PUT /api/room/update/{room_id} - 更新房间信息
+- DELETE /api/room/destroy/{room_id} - 销毁房间
+- POST /api/room/detect-person - AI人脸检测
+
+### 学习时长接口 `/api/duration`
+- GET /api/duration/daily - 获取每日学习时长
+- GET /api/duration/weekly - 获取近7天学习时长
+- GET /api/duration/rank - 获取学习时长排行榜
+- GET /api/duration/rank/weekly - 获取周排行榜
+- GET /api/duration/rank/monthly - 获取月排行榜
+- GET /api/duration/period/summary - 获取时间段学习时长汇总
+
+### 收藏夹接口 `/api/bookmark`
+- POST /api/bookmark - 创建收藏
+- GET /api/bookmark - 获取收藏列表
+- GET /api/bookmark/tags - 获取所有标签
+- PUT /api/bookmark/{id}/tags - 更新收藏标签
+- DELETE /api/bookmark/{id} - 删除收藏
+- DELETE /api/bookmark/tag/{tag} - 删除标签
+
+### WebSocket接口
+- ws://host/ws/room/{room_id}?user_id={user_id} - 房间实时通信
+
+## 数据库设计
+
+### 表结构
+- **user**: 用户信息表
+- **study_room**: 自习室表
+- **room_user**: 自习室成员表
+- **study_duration**: 学习时长表
+- **bookmark**: 收藏夹表
+- **check_in**: 打卡记录表
+
+### 关系说明
+- User 1:N RoomUser（用户可以有多个自习室记录）
+- StudyRoom 1:N RoomUser（自习室可以有多个成员）
+- User 1:N StudyDuration（用户可以有多个时长记录）
+- User 1:N Bookmark（用户可以有多个收藏）
+- User 1:N CheckIn（用户可以有多个打卡记录）
 
 ## 技术架构特点
 
@@ -157,69 +237,49 @@ project/
 - **组件化设计**: 高内聚低耦合，便于维护和测试
 - **Composition API**: 逻辑复用，代码组织清晰
 - **响应式设计**: 适配不同设备，用户体验良好
+- **Composables模式**: 逻辑分离，状态管理集中
 
 ### 后端架构优势
-- **异步框架**: FastAPI 提供高性能 API 服务
+- **异步框架**: FastAPI提供高性能API服务
 - **分层架构**: 控制器-服务-模型分层清晰
-- **缓存优化**: Redis 提升实时性能
-- **WebSocket 支持**: 实时通信能力强大
+- **缓存优化**: Redis提升实时性能（默认fakeredis模拟）
+- **WebSocket支持**: 实时通信能力强大
 
 ### 数据库设计
-- **关系型数据库**: MySQL/SQLite 支持事务一致性
-- **缓存层**: Redis 提供高速数据访问
+- **关系型数据库**: MySQL/SQLite支持事务一致性
+- **缓存层**: Redis提供高速数据访问
 - **数据模型**: 合理的表结构和关系设计
 
 ## 部署和运维
 
 ### 开发环境
-- 前端: Vite 开发服务器 + 热重载
-- 后端: Uvicorn 开发服务器 + 自动重载
-- 数据库: SQLite（默认）或本地 MySQL
+- 前端: Vite开发服务器 + 热重载
+- 后端: Uvicorn开发服务器 + 自动重载
+- 数据库: SQLite（默认）或本地MySQL
+- 缓存: fakeredis（默认）或Redis
 
 ### 生产环境
-- 前端: Nginx 静态文件服务
-- 后端: Uvicorn + Gunicorn 多进程
-- 数据库: MySQL 集群 + Redis 集群
-- 监控: 日志收集 + 性能监控
+- 前端: Nginx静态文件服务
+- 后端: Uvicorn + Gunicorn多进程
+- 数据库: MySQL集群
+- 缓存: Redis集群
 
-## 扩展性考虑
+## 变更记录
 
-### 功能扩展
-- 支持更多 AI 检测算法
-- 添加视频会议功能
-- 集成第三方学习资源
-- 支持移动端应用
+### 前端更新
+- 新增 `src/composables/` 目录，实现逻辑分离：
+  - useCamera.js: 摄像头管理
+  - useWebSocket.js: WebSocket连接管理
+  - useWebRTC.js: WebRTC视频通信
+  - useRoomData.js: 房间数据轮询与状态管理
+  - useAiDetection.js: AI检测逻辑封装
+  - useRoomSignaling.js: 房间信令通信管理
+- 新增组件：BookmarkPanel.vue、CheckInCard.vue、EditAvatar.vue
+- StudyRoomDetail.vue 已重构，逻辑迁移至 composables
 
-### 性能扩展
-- 数据库读写分离
-- Redis 集群部署
-- CDN 静态资源加速
-- 微服务架构拆分
-
-## 安全考虑
-
-### 数据安全
-- 密码加密存储
-- JWT Token 认证
-- SQL 注入防护
-- XSS 攻击防护
-
-### 隐私保护
-- 摄像头访问权限控制
-- 用户数据加密传输
-- 隐私模式支持
-- 数据访问权限控制
-
-变更记录（最近）:
-- 前端:
-    - 新增 `src/composables/` 目录，主要文件：useCamera.js、useWebSocket.js、useWebRTC.js、useRoomData.js、useAiDetection.js、useRoomSignaling.js。
-    - 已将 `StudyRoomDetail.vue` 中的信令（WebSocket）、WebRTC 以及摄像头/AI 检测逻辑迁移到上述 composables，组件仅保留视图与交互控制，轮询与后端 API 调用集中在 `useRoomData.js`。
-
-- 后端:
-    - `utils/cache.py` 新增高层 Redis 辅助函数（如房间元信息、房间成员集合、活跃用户检查、空闲房间查询等），用于抽象 Redis 键与常见操作。
-    - `services/room_service.py` 已逐步使用 `cache` 提供的高层接口，减少散布在代码中的 Redis 键操作，修复了若干引用错误，并改善了离开/销毁流程的一致性。
-    - `app.py` 的 WebSocket 断开处理（WebSocketDisconnect）已加入后端补偿逻辑，断开时会调用 `room_service.leave_room(...)` 以确保用户在后端/Redis 中被清理并记录学习时长。
-
-- 文档 & 建议:
-    - 已在本文件记录 composables 位置与后端改动。建议团队拉取最新代码后本地运行并验证：加入/退出、房间销毁、浏览器关闭补偿、AI 自动退出等交互。
-    - 建议为 `useRoomSignaling`、`useRoomData` 添加单元/集成测试以覆盖关键行为（断线补偿、轮询终止、AI 无人退出）。
+### 后端更新
+- `utils/cache.py` 新增高层 Redis 辅助函数（房间元信息、成员集合、活跃用户检查等）
+- `services/room_service.py` 使用 cache 高层接口，改善离开/销毁流程
+- `app.py` WebSocket 断开处理加入后端补偿逻辑（离开房间并记录学习时长）
+- 新增 `bookmark_controller.py` 和 `bookmark_service.py` 实现收藏夹功能
+- 新增 `check_in_service.py` 实现每日打卡功能

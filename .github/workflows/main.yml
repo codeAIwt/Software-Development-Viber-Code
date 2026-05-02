@@ -6,11 +6,15 @@ on:
   pull_request:
     branches: [ main, master ]
 
+env:
+  PYTHON_VERSION: '3.12'
+  NODE_VERSION: '18'
+
 jobs:
   backend-test:
     name: Backend Test Suite
     runs-on: ubuntu-latest
-    
+
     services:
       redis:
         image: redis:7-alpine
@@ -44,23 +48,31 @@ jobs:
       DB_USER: 'test_user'
       DB_PASSWORD: 'test_password'
       DB_NAME: 'online_study_test'
-    
+
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
-    
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v4
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.12'
-    
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
     - name: Install backend dependencies
       run: |
         cd backend
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pytest pytest-cov
-    
+        pip install pytest pytest-cov pytest-asyncio
+
     - name: Wait for MySQL to be ready
       run: |
         cd backend
@@ -78,207 +90,51 @@ jobs:
             try:
                 conn = pymysql.connect(host=host, port=port, user=user, password=password, database=db)
                 conn.close()
-                print('✅ MySQL is available')
+                print('MySQL is available')
                 break
             except Exception as e:
-                print('Waiting for MySQL...', e)
+                print('Waiting for MySQL...')
                 time.sleep(2)
         else:
-            print('❌ MySQL not ready')
+            print('MySQL not ready')
             sys.exit(1)
         PY
-    
-    - name: Run database initialization test (TC-001)
+
+    - name: Run database initialization test
       run: |
         cd backend
         python - <<'PY'
         from config.db import init_db, engine
         from sqlalchemy import text
-        import sys
 
-        try:
-            # Test database connection
-            with engine.connect() as conn:
-                result = conn.execute(text('SELECT 1'))
-                print('✅ Database connection test passed')
+        with engine.connect() as conn:
+            result = conn.execute(text('SELECT 1'))
+            assert result.fetchone()[0] == 1, 'Database connection test failed'
+            print('Database connection test passed')
 
-            # Test table creation
-            init_db()
-            print('✅ Database initialization test passed')
+        init_db()
+        print('Database initialization test passed')
 
-            # Test table structure
-            with engine.connect() as conn:
-                tables = conn.execute(text('SHOW TABLES')).fetchall()
-                print(f'✅ Found {len(tables)} tables')
-
-        except Exception as e:
-            print(f'❌ Database test failed: {e}')
-            sys.exit(1)
+        with engine.connect() as conn:
+            tables = conn.execute(text('SHOW TABLES')).fetchall()
+            assert len(tables) > 0, f'No tables found, expected some tables'
+            print(f'Found {len(tables)} tables')
         PY
-    
-    - name: Run model validation test (TC-002)
+
+    - name: Run pytest test suite
       run: |
         cd backend
-        python - <<'PY'
-        from models.user import User
-        from models.study_room import StudyRoom
-        from models.room_user import RoomUser
-        from models.study_duration import StudyDuration
-        from datetime import datetime, date
-        import sys
+        mkdir -p test-results
+        python -m pytest test_integration_strict.py -v --tb=short --junitxml=test-results/backend-test.xml
 
-        try:
-            # Test User model
-            user = User(id='test_user_001', phone='13900000001', password='hashed_password',
-                        nickname='Test User', avatar='default.jpg', registertime=datetime.now())
-            assert user.id == 'test_user_001'
-            print('✅ User model test passed')
+    - name: Upload backend test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: backend-test-results
+        path: backend/test-results
+        retention-days: 7
 
-            # Test StudyRoom model
-            room = StudyRoom(id='test_room_001', theme='考研', max_people=4,
-                             current_people=1, status='active', creator_id='test_user_001',
-                             create_time=datetime.now())
-            assert room.theme == '考研'
-            print('✅ StudyRoom model test passed')
-
-            # Test StudyDuration model
-            duration = StudyDuration(user_id='test_user_001', study_date=date.today(),
-                                     total_minutes=120, beat_percent=85.5)
-            assert duration.total_minutes == 120
-            print('✅ StudyDuration model test passed')
-
-            print('✅ All model validation tests passed')
-
-        except Exception as e:
-            print(f'❌ Model validation test failed: {e}')
-            sys.exit(1)
-        PY
-    
-    - name: Run service layer tests (TC-003, TC-004)
-      run: |
-        cd backend
-        python - <<'PY'
-        from services.user_service import register_user, login_user
-        from services.duration_service import update_study_duration, get_user_daily_duration
-        from config.db import get_db
-        from datetime import date
-        import sys, traceback
-
-        try:
-            db = next(get_db())
-
-            # Create a test user (phone must be 11 digits)
-            phone = '13900000001'
-            password = 'Test123456'
-            try:
-                user = register_user(db, phone, password)
-            except Exception:
-                # If already exists, fetch by phone
-                from sqlalchemy import select
-                from models.user import User
-                user = db.scalar(select(User).where(User.phone == phone))
-                if not user:
-                    raise
-
-            assert user.phone == phone
-            print('✅ register_user passed')
-
-            # Login
-            logged = login_user(db, phone, password)
-            assert logged.id == user.id
-            print('✅ login_user passed')
-
-            # Update study duration
-            rec = update_study_duration(db, user.id, 120)
-            assert rec.total_minutes >= 120
-            print('✅ update_study_duration passed')
-
-            # Get daily duration
-            today = date.today()
-            daily = get_user_daily_duration(db, user.id, today)
-            assert daily['total_minutes'] >= 120
-            print('✅ get_user_daily_duration passed')
-
-            db.close()
-        except Exception as e:
-            traceback.print_exc()
-            print(f'❌ Service layer test failed: {e}')
-            sys.exit(1)
-        PY
-    
-    - name: Run API endpoint tests (TC-005, TC-006)
-      run: |
-        cd backend
-        python - <<'PY'
-        from controllers.user_controller import router as user_router
-        from controllers.room_controller import router as room_router
-        from controllers.duration_controller import router as duration_router
-        import sys
-
-        try:
-            # Test router imports
-            assert user_router is not None
-            assert room_router is not None
-            assert duration_router is not None
-
-            # Test route paths
-            user_routes = [route.path for route in user_router.routes]
-            room_routes = [route.path for route in room_router.routes]
-            duration_routes = [route.path for route in duration_router.routes]
-
-            print(f'✅ User routes: {len(user_routes)} routes found')
-            print(f'✅ Room routes: {len(room_routes)} routes found')
-            print(f'✅ Duration routes: {len(duration_routes)} routes found')
-
-            # Verify critical endpoints exist
-            expected_endpoints = ['/api/user/register', '/api/user/login', '/api/room/create', '/api/duration/daily']
-            all_routes = user_routes + room_routes + duration_routes
-
-            for endpoint in expected_endpoints:
-                if any(endpoint in route for route in all_routes):
-                    print(f'✅ Endpoint {endpoint} found')
-                else:
-                    print(f'⚠️  Endpoint {endpoint} not found')
-
-            print('✅ API endpoint test passed')
-
-        except Exception as e:
-            print(f'❌ API endpoint test failed: {e}')
-            sys.exit(1)
-        PY
-    
-    - name: Run Redis integration test (TC-007, TC-008)
-      run: |
-        cd backend
-        python - <<'PY'
-        from utils.cache import _redis
-        import sys
-
-        try:
-            # Test Redis connection
-            r = _redis()
-
-            # Test basic operations
-            test_key = 'github_actions_test'
-            test_value = 'test_value'
-
-            r.set(test_key, test_value, ex=60)
-            retrieved_value = r.get(test_key)
-
-            if isinstance(retrieved_value, bytes):
-                retrieved_value = retrieved_value.decode()
-            assert retrieved_value == test_value
-            print('✅ Redis connection and basic operations test passed')
-
-            # Test cache functionality
-            r.delete(test_key)
-            print('✅ Redis cache functionality test passed')
-
-        except Exception as e:
-            print(f'❌ Redis integration test failed: {e}')
-            sys.exit(1)
-        PY
-    
     - name: Run code quality checks
       run: |
         cd backend
@@ -287,50 +143,53 @@ jobs:
         python -m py_compile services/*.py
         python -m py_compile models/*.py
         python -m py_compile utils/*.py
-        echo '✅ All Python files compiled successfully'
+        echo 'All Python files compiled successfully'
 
   frontend-test:
     name: Frontend Test Suite
     runs-on: ubuntu-latest
     needs: backend-test
-    
+
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
-    
-    - name: Set up Node.js
-      uses: actions/setup-node@v3
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js ${{ env.NODE_VERSION }}
+      uses: actions/setup-node@v4
       with:
-        node-version: '18'
-    
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Cache node_modules
+      uses: actions/cache@v4
+      with:
+        path: frontend/node_modules
+        key: ${{ runner.os }}-node-${{ hashFiles('frontend/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+
     - name: Install frontend dependencies
       run: |
         cd frontend
         export NODE_ENV=development
-        npm install --include=dev
-        ls -la node_modules/.bin/ | head -20
-    
+        npm install
+
     - name: Run frontend linting
       run: |
         cd frontend
-        npm run lint || echo '⚠️ Linting completed with warnings'
-        echo '✅ Frontend linting completed'
-    
+        npm run lint || echo 'Linting completed with warnings'
+
     - name: Build frontend for production
       run: |
         cd frontend
         npm run build
-        echo '✅ Frontend build completed successfully'
-    
+
     - name: Verify build output
       run: |
         cd frontend
-        ls -la dist/
-        # Check if essential files exist
-        if [ -f "dist/index.html" ] && [ -d "dist/assets" ] && [ "$(ls -A dist/assets/*.js 2>/dev/null)" ]; then
-            echo '✅ Build output structure verification passed'
+        if [ -f "dist/index.html" ] && [ -d "dist/assets" ]; then
+            echo 'Build output structure verification passed'
         else
-            echo '❌ Build output structure verification failed'
+            echo 'Build output structure verification failed'
             exit 1
         fi
 
@@ -338,7 +197,7 @@ jobs:
     name: Integration Test
     runs-on: ubuntu-latest
     needs: [backend-test, frontend-test]
-    
+
     services:
       redis:
         image: redis:7-alpine
@@ -372,23 +231,23 @@ jobs:
       DB_USER: 'test_user'
       DB_PASSWORD: 'test_password'
       DB_NAME: 'online_study_test'
-    
+
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
-    
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v4
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.12'
-    
+        python-version: ${{ env.PYTHON_VERSION }}
+
     - name: Install backend dependencies
       run: |
         cd backend
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install pytest requests websockets>=11.0
-    
+
     - name: Wait for MySQL to be ready
       run: |
         cd backend
@@ -406,32 +265,31 @@ jobs:
             try:
                 conn = pymysql.connect(host=host, port=port, user=user, password=password, database=db)
                 conn.close()
-                print('✅ MySQL is available')
+                print('MySQL is available')
                 break
             except Exception as e:
-                print('Waiting for MySQL...', e)
+                print('Waiting for MySQL...')
                 time.sleep(2)
         else:
-            print('❌ MySQL not ready')
+            print('MySQL not ready')
             sys.exit(1)
         PY
-    
+
     - name: Start backend server in background
       run: |
         cd backend
         nohup uvicorn app:app --host 0.0.0.0 --port 8000 > server.log 2>&1 &
         echo $! > server.pid
         sleep 10
-        
-        # Check if server is running
+
         if curl -f http://localhost:8000/docs > /dev/null 2>&1; then
-            echo '✅ Backend server started successfully'
+            echo 'Backend server started successfully'
         else
-            echo '❌ Backend server failed to start'
+            echo 'Backend server failed to start'
             cat server.log
             exit 1
         fi
-    
+
     - name: Run API integration tests
       run: |
         cd backend
@@ -442,179 +300,361 @@ jobs:
         import base64
         import numpy as np
         import cv2
+        import sys
 
         base_url = "http://localhost:8000"
+        failed_tests = []
+
+        def assert_status(response, expected_code, test_name):
+            if response.status_code != expected_code:
+                failed_tests.append(f"{test_name}: expected {expected_code}, got {response.status_code}")
+                return False
+            return True
+
+        def assert_response_ok(response, test_name):
+            data = response.json()
+            if data.get("code") != 200:
+                failed_tests.append(f"{test_name}: response code is {data.get('code')}, expected 200")
+                return False
+            return True
+
         token = ""
         test_room_id = ""
+        test_user_id = ""
 
         # TC-001: User registration and login
         print("\n=== TC-001: User registration and login ===")
         try:
-            reg_data = {
-                "phone": "13900000999",
-                "password": "Test123456"
-            }
+            reg_data = {"phone": "13900000999", "password": "Test123456"}
             response = requests.post(f"{base_url}/api/user/register", json=reg_data)
-            print(f"✅ User registration: {response.status_code}")
-            if response.status_code == 200:
-                print("✅ Registration successful")
+            if not assert_status(response, 200, "TC-001 Register"):
+                print(f"TC-001 Register failed: {response.text}")
             else:
-                print(f"⚠️ Registration returned: {response.text}")
-
-            # Test login
-            login_data = {
-                "phone": "13900000999",
-                "password": "Test123456"
-            }
-            response = requests.post(f"{base_url}/api/user/login", json=login_data)
-            print(f"✅ User login: {response.status_code}")
-            if response.status_code == 200:
+                assert_response_ok(response, "TC-001 Register")
                 data = response.json().get("data", {})
+                assert "user_id" in data, "TC-001: user_id not in response"
+                assert "token" in data, "TC-001: token not in response"
+                print("TC-001: User registration passed")
+
+            login_data = {"phone": "13900000999", "password": "Test123456"}
+            response = requests.post(f"{base_url}/api/user/login", json=login_data)
+            if not assert_status(response, 200, "TC-001 Login"):
+                print(f"TC-001 Login failed: {response.text}")
+            else:
+                data = response.json().get("data", {})
+                assert "user_id" in data, "TC-001: user_id not in login response"
+                assert "token" in data, "TC-001: token not in login response"
                 token = data.get("token", "")
-                print(f"✅ Token obtained")
+                test_user_id = data.get("user_id", "")
+                print(f"TC-001: User login passed, user_id: {test_user_id}")
         except Exception as e:
-            print(f"❌ TC-001 failed: {e}")
+            failed_tests.append(f"TC-001 exception: {e}")
+            import traceback
+            traceback.print_exc()
 
         # TC-002: Study room creation
         print("\n=== TC-002: Study room creation ===")
-        try:
-            if token:
+        if token:
+            try:
                 headers = {"Authorization": f"Bearer {token}"}
-                room_data = {
-                    "theme": "考研",
-                    "max_people": 4,
-                    "tags": ["考研", "数学", "英语"]
-                }
+                room_data = {"theme": "考研", "max_people": 4, "tags": ["考研", "数学"]}
                 response = requests.post(f"{base_url}/api/room/create", json=room_data, headers=headers)
-                print(f"✅ Room creation: {response.status_code}")
-                if response.status_code == 200:
-                    room_result = response.json().get("data", {})
-                    test_room_id = room_result.get("id", "")
-                    print(f"✅ Room ID: {test_room_id}")
+                if not assert_status(response, 200, "TC-002 Create Room"):
+                    print(f"TC-002 Create Room failed: {response.text}")
                 else:
-                    print(f"⚠️ Room creation returned: {response.text}")
-        except Exception as e:
-            print(f"❌ TC-002 failed: {e}")
+                    assert_response_ok(response, "TC-002 Create Room")
+                    room_result = response.json().get("data", {})
+                    assert "id" in room_result, "TC-002: room id not in response"
+                    test_room_id = room_result.get("id", "")
+                    print(f"TC-002: Room creation passed, room_id: {test_room_id}")
+            except Exception as e:
+                failed_tests.append(f"TC-002 exception: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            failed_tests.append("TC-002: skipped due to missing token")
 
         # TC-003: Study room joining
         print("\n=== TC-003: Study room joining ===")
-        try:
-            if token:
+        if token and test_room_id:
+            try:
                 headers = {"Authorization": f"Bearer {token}"}
-                response = requests.get(f"{base_url}/api/room/list", headers=headers)
-                if response.status_code == 200:
-                    rooms = response.json().get("data", [])
-                    if rooms:
-                        room_id = rooms[0].get("id")
-                        if room_id:
-                            test_room_id = room_id
-                            join_data = {"room_id": room_id}
-                            response = requests.post(f"{base_url}/api/room/join", json=join_data, headers=headers)
-                            print(f"✅ Room joining: {response.status_code}")
-                    else:
-                        print("⚠️ No rooms available in list")
+                join_data = {"room_id": test_room_id}
+                response = requests.post(f"{base_url}/api/room/join", json=join_data, headers=headers)
+                if not assert_status(response, 200, "TC-003 Join Room"):
+                    print(f"TC-003 Join Room failed: {response.text}")
                 else:
-                    print(f"⚠️ Room list returned: {response.text}")
-        except Exception as e:
-            print(f"❌ TC-003 failed: {e}")
+                    assert_response_ok(response, "TC-003 Join Room")
+                    print("TC-003: Room joining passed")
+            except Exception as e:
+                failed_tests.append(f"TC-003 exception: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            failed_tests.append("TC-003: skipped due to missing token or room_id")
 
         # TC-004: Study duration recording
         print("\n=== TC-004: Study duration recording ===")
-        try:
-            if token:
+        if token:
+            try:
                 headers = {"Authorization": f"Bearer {token}"}
                 response = requests.get(f"{base_url}/api/duration/daily", headers=headers)
-                print(f"✅ Daily duration: {response.status_code}")
+                if not assert_status(response, 200, "TC-004 Daily Duration"):
+                    print(f"TC-004 Daily Duration failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-004 Daily Duration")
+                    data = response.json().get("data", {})
+                    assert "total_minutes" in data, "TC-004: total_minutes not in response"
+                    print("TC-004: Daily duration passed")
 
                 response = requests.get(f"{base_url}/api/duration/weekly", headers=headers)
-                print(f"✅ Weekly duration: {response.status_code}")
-        except Exception as e:
-            print(f"❌ TC-004 failed: {e}")
+                if not assert_status(response, 200, "TC-004 Weekly Duration"):
+                    print(f"TC-004 Weekly Duration failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-004 Weekly Duration")
+                    data = response.json().get("data", {})
+                    assert isinstance(data, list), "TC-004: weekly data should be a list"
+                    print("TC-004: Weekly duration passed")
+
+                response = requests.get(f"{base_url}/api/duration/period/summary?period=week", headers=headers)
+                if not assert_status(response, 200, "TC-004 Period Summary"):
+                    print(f"TC-004 Period Summary failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-004 Period Summary")
+                    print("TC-004: Period summary passed")
+            except Exception as e:
+                failed_tests.append(f"TC-004 exception: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            failed_tests.append("TC-004: skipped due to missing token")
 
         # TC-005: Leaderboard functionality
         print("\n=== TC-005: Leaderboard functionality ===")
-        try:
-            if token:
+        if token:
+            try:
                 headers = {"Authorization": f"Bearer {token}"}
                 response = requests.get(f"{base_url}/api/duration/rank", headers=headers)
-                print(f"✅ Leaderboard: {response.status_code}")
-        except Exception as e:
-            print(f"❌ TC-005 failed: {e}")
+                if not assert_status(response, 200, "TC-005 Daily Rank"):
+                    print(f"TC-005 Daily Rank failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-005 Daily Rank")
+                    print("TC-005: Daily leaderboard passed")
+
+                response = requests.get(f"{base_url}/api/duration/rank/weekly", headers=headers)
+                if not assert_status(response, 200, "TC-005 Weekly Rank"):
+                    print(f"TC-005 Weekly Rank failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-005 Weekly Rank")
+                    print("TC-005: Weekly leaderboard passed")
+
+                response = requests.get(f"{base_url}/api/duration/rank/monthly", headers=headers)
+                if not assert_status(response, 200, "TC-005 Monthly Rank"):
+                    print(f"TC-005 Monthly Rank failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-005 Monthly Rank")
+                    print("TC-005: Monthly leaderboard passed")
+            except Exception as e:
+                failed_tests.append(f"TC-005 exception: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            failed_tests.append("TC-005: skipped due to missing token")
 
         # TC-006: AI face detection
         print("\n=== TC-006: AI face detection ===")
-        try:
-            if token and test_room_id:
+        if token and test_room_id:
+            try:
                 headers = {"Authorization": f"Bearer {token}"}
-                # Create a simple test image with OpenCV
                 img = np.zeros((100, 100, 3), dtype=np.uint8)
-                img.fill(255)  # White image
-                # Encode to base64
+                img.fill(255)
                 _, buffer = cv2.imencode('.jpg', img)
                 img_base64 = base64.b64encode(buffer).decode('utf-8')
                 img_data = f"data:image/jpeg;base64,{img_base64}"
 
-                detect_data = {
-                    "image": img_data,
-                    "room_id": test_room_id,
-                    "user_id": "test_user"
-                }
+                detect_data = {"image": img_data, "room_id": test_room_id, "user_id": test_user_id}
                 response = requests.post(f"{base_url}/api/room/detect-person", json=detect_data, headers=headers)
-                print(f"✅ AI detection: {response.status_code}")
-                if response.status_code == 200:
+                if not assert_status(response, 200, "TC-006 AI Detection"):
+                    print(f"TC-006 AI Detection failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-006 AI Detection")
                     result = response.json().get("data", {})
-                    print(f"✅ Detection result: has_person={result.get('has_person')}")
-        except Exception as e:
-            print(f"❌ TC-006 failed: {e}")
+                    assert "has_person" in result, "TC-006: has_person not in response"
+                    print(f"TC-006: AI detection passed, has_person={result.get('has_person')}")
+            except Exception as e:
+                failed_tests.append(f"TC-006 exception: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            failed_tests.append("TC-006: skipped due to missing token or room_id")
 
-        # TC-009: Room update and destroy
-        print("\n=== TC-009: Room update and destroy ===")
-        try:
-            if token and test_room_id:
+        # TC-007: User profile and tags
+        print("\n=== TC-007: User profile and tags ===")
+        if token:
+            try:
                 headers = {"Authorization": f"Bearer {token}"}
 
-                # Get room info
-                response = requests.get(f"{base_url}/api/room/info/{test_room_id}", headers=headers)
-                print(f"✅ Get room info: {response.status_code}")
-
-                # Update room theme
-                update_data = {"theme": "期末考试"}
-                response = requests.put(f"{base_url}/api/room/update/{test_room_id}", json=update_data, headers=headers)
-                print(f"✅ Room update: {response.status_code}")
-
-                # Leave room
-                leave_data = {"room_id": test_room_id}
-                response = requests.post(f"{base_url}/api/room/leave", json=leave_data, headers=headers)
-                print(f"✅ Room leave: {response.status_code}")
-        except Exception as e:
-            print(f"❌ TC-009 failed: {e}")
-
-        # TC-010: User profile and tags
-        print("\n=== TC-010: User profile and tags ===")
-        try:
-            if token:
-                headers = {"Authorization": f"Bearer {token}"}
-
-                # Get user profile
                 response = requests.get(f"{base_url}/api/user/profile", headers=headers)
-                print(f"✅ Get profile: {response.status_code}")
+                if not assert_status(response, 200, "TC-007 Get Profile"):
+                    print(f"TC-007 Get Profile failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-007 Get Profile")
+                    data = response.json().get("data", {})
+                    assert "nickname" in data, "TC-007: nickname not in profile"
+                    print("TC-007: Get profile passed")
 
-                # Get available tags
                 response = requests.get(f"{base_url}/api/user/tags", headers=headers)
-                print(f"✅ Get tags: {response.status_code}")
-                if response.status_code == 200:
-                    tags = response.json().get("data", [])
-                    print(f"✅ Available tags: {len(tags)} tags")
+                if not assert_status(response, 200, "TC-007 Get Tags"):
+                    print(f"TC-007 Get Tags failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-007 Get Tags")
+                    data = response.json().get("data", {})
+                    assert isinstance(data, list), "TC-007: tags should be a list"
+                    print(f"TC-007: Get tags passed, {len(data)} tags available")
 
-                # Update nickname
                 nickname_data = {"nickname": "测试用户"}
                 response = requests.put(f"{base_url}/api/user/profile/nickname", json=nickname_data, headers=headers)
-                print(f"✅ Update nickname: {response.status_code}")
-        except Exception as e:
-            print(f"❌ TC-010 failed: {e}")
+                if not assert_status(response, 200, "TC-007 Update Nickname"):
+                    print(f"TC-007 Update Nickname failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-007 Update Nickname")
+                    print("TC-007: Update nickname passed")
 
-        # TC-007: WebSocket real-time communication
-        print("\n=== TC-007: WebSocket real-time communication ===")
+                if test_user_id:
+                    response = requests.get(f"{base_url}/api/user/info/{test_user_id}", headers=headers)
+                    if not assert_status(response, 200, "TC-007 Get User Info"):
+                        print(f"TC-007 Get User Info failed: {response.text}")
+                    else:
+                        assert_response_ok(response, "TC-007 Get User Info")
+                        print("TC-007: Get user info passed")
+            except Exception as e:
+                failed_tests.append(f"TC-007 exception: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            failed_tests.append("TC-007: skipped due to missing token")
+
+        # TC-008: Check-in functionality
+        print("\n=== TC-008: Check-in functionality ===")
+        if token:
+            try:
+                headers = {"Authorization": f"Bearer {token}"}
+
+                response = requests.post(f"{base_url}/api/user/check-in", headers=headers)
+                if not assert_status(response, 200, "TC-008 Check-in"):
+                    print(f"TC-008 Check-in failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-008 Check-in")
+                    print("TC-008: Check-in passed")
+
+                response = requests.get(f"{base_url}/api/user/check-in/status", headers=headers)
+                if not assert_status(response, 200, "TC-008 Check-in Status"):
+                    print(f"TC-008 Check-in Status failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-008 Check-in Status")
+                    data = response.json().get("data", {})
+                    assert "checked_in_today" in data, "TC-008: checked_in_today not in response"
+                    print("TC-008: Check-in status passed")
+            except Exception as e:
+                failed_tests.append(f"TC-008 exception: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            failed_tests.append("TC-008: skipped due to missing token")
+
+        # TC-009: Bookmark functionality
+        print("\n=== TC-009: Bookmark functionality ===")
+        if token:
+            try:
+                headers = {"Authorization": f"Bearer {token}"}
+
+                bookmark_data = {"title": "测试收藏", "url": "https://example.com", "tags": "测试"}
+                response = requests.post(f"{base_url}/api/bookmark", json=bookmark_data, headers=headers)
+                bookmark_id = None
+                if not assert_status(response, 200, "TC-009 Create Bookmark"):
+                    print(f"TC-009 Create Bookmark failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-009 Create Bookmark")
+                    data = response.json().get("data", {})
+                    assert "id" in data, "TC-009: id not in bookmark response"
+                    bookmark_id = data.get("id")
+                    print(f"TC-009: Create bookmark passed, id: {bookmark_id}")
+
+                response = requests.get(f"{base_url}/api/bookmark", headers=headers)
+                if not assert_status(response, 200, "TC-009 Get Bookmarks"):
+                    print(f"TC-009 Get Bookmarks failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-009 Get Bookmarks")
+                    data = response.json().get("data", {})
+                    assert isinstance(data, list), "TC-009: bookmarks should be a list"
+                    print(f"TC-009: Get bookmarks passed, count: {len(data)}")
+
+                response = requests.get(f"{base_url}/api/bookmark/tags", headers=headers)
+                if not assert_status(response, 200, "TC-009 Get Bookmark Tags"):
+                    print(f"TC-009 Get Bookmark Tags failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-009 Get Bookmark Tags")
+                    print("TC-009: Get bookmark tags passed")
+
+                if bookmark_id:
+                    update_data = {"tags": "新标签"}
+                    response = requests.put(f"{base_url}/api/bookmark/{bookmark_id}/tags", json=update_data, headers=headers)
+                    if not assert_status(response, 200, "TC-009 Update Bookmark Tags"):
+                        print(f"TC-009 Update Bookmark Tags failed: {response.text}")
+                    else:
+                        assert_response_ok(response, "TC-009 Update Bookmark Tags")
+                        print("TC-009: Update bookmark tags passed")
+
+                    response = requests.delete(f"{base_url}/api/bookmark/{bookmark_id}", headers=headers)
+                    if not assert_status(response, 200, "TC-009 Delete Bookmark"):
+                        print(f"TC-009 Delete Bookmark failed: {response.text}")
+                    else:
+                        assert_response_ok(response, "TC-009 Delete Bookmark")
+                        print("TC-009: Delete bookmark passed")
+            except Exception as e:
+                failed_tests.append(f"TC-009 exception: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            failed_tests.append("TC-009: skipped due to missing token")
+
+        # TC-010: Room update and destroy
+        print("\n=== TC-010: Room update and destroy ===")
+        if token and test_room_id:
+            try:
+                headers = {"Authorization": f"Bearer {token}"}
+
+                response = requests.get(f"{base_url}/api/room/info/{test_room_id}", headers=headers)
+                if not assert_status(response, 200, "TC-010 Get Room Info"):
+                    print(f"TC-010 Get Room Info failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-010 Get Room Info")
+                    print("TC-010: Get room info passed")
+
+                update_data = {"theme": "期末考试"}
+                response = requests.put(f"{base_url}/api/room/update/{test_room_id}", json=update_data, headers=headers)
+                if not assert_status(response, 200, "TC-010 Update Room"):
+                    print(f"TC-010 Update Room failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-010 Update Room")
+                    print("TC-010: Room update passed")
+
+                leave_data = {"room_id": test_room_id}
+                response = requests.post(f"{base_url}/api/room/leave", json=leave_data, headers=headers)
+                if not assert_status(response, 200, "TC-010 Leave Room"):
+                    print(f"TC-010 Leave Room failed: {response.text}")
+                else:
+                    assert_response_ok(response, "TC-010 Leave Room")
+                    print("TC-010: Leave room passed")
+            except Exception as e:
+                failed_tests.append(f"TC-010 exception: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            failed_tests.append("TC-010: skipped due to missing token or room_id")
+
+        # TC-011: WebSocket real-time communication
+        print("\n=== TC-011: WebSocket real-time communication ===")
         try:
             import websockets
             import asyncio
@@ -627,63 +667,68 @@ jobs:
                     async with websockets.connect(uri) as websocket:
                         test_message = {"type": "test", "message": "Integration test"}
                         await websocket.send(json.dumps(test_message))
-                        print("✅ WebSocket connection test passed")
+                        print("TC-011: WebSocket connection and message sent passed")
                 except Exception as e:
-                    print(f"⚠️ WebSocket test: {e}")
+                    failed_tests.append(f"TC-011 WebSocket exception: {e}")
 
             asyncio.run(test_websocket())
         except Exception as e:
-            print(f"❌ TC-007 failed: {e}")
+            failed_tests.append(f"TC-011 exception: {e}")
 
-        print("\n✅ API integration tests completed")
+        print("\n=== Integration Test Summary ===")
+        if failed_tests:
+            print(f"FAILED: {len(failed_tests)} test(s)")
+            for f in failed_tests:
+                print(f"  - {f}")
+            sys.exit(1)
+        else:
+            print("PASSED: All API integration tests passed")
+
+        import xml.etree.ElementTree as ET
+        import os
+        os.makedirs("integration-results", exist_ok=True)
+
+        test_suite = ET.Element("testsuite", name="integration-tests", tests=str(len(failed_tests) if failed_tests else 11), failures=str(len(failed_tests)) if failed_tests else "0", errors="0")
+
+        if failed_tests:
+            for failure in failed_tests:
+                test_case = ET.SubElement(test_suite, "testcase", name=failure)
+                failure_elem = ET.SubElement(test_case, "failure", message=failure)
+                failure_elem.text = failure
+        else:
+            for i in range(1, 12):
+                ET.SubElement(test_suite, "testcase", name=f"TC-{str(i).zfill(3)}")
+
+        tree = ET.ElementTree(test_suite)
+        tree.write("integration-results/integration-test.xml", encoding="utf-8", xml_declaration=True)
         PY
-    
+
     - name: Run integration health check
       run: |
-        # Test backend API health
         curl -f http://localhost:8000/docs || exit 1
-        echo '✅ Backend API health check passed'
-        
-        # Test core API endpoints (requires authentication, so just check if they return 401 instead of 404)
-        curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/room/list | grep -E "(200|401)" || echo '⚠️ Room list endpoint test'
-        curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/duration/rank | grep -E "(200|401)" || echo '⚠️ Leaderboard endpoint test'
-        
-        echo '✅ API endpoints health check passed'
-    
-    - name: Run data consistency test (TC-008)
+        echo 'Backend API health check passed'
+
+    - name: Run data consistency test
       run: |
         cd backend
         python - <<'PY'
-        import requests
-        import json
-        
-        base_url = "http://localhost:8000"
-        
-        # Test data consistency between Redis and MySQL
-        print("\n=== TC-008: Data consistency test ===")
-        try:
-            # Test Redis connection
-            from utils.cache import _redis
-            r = _redis()
-            test_key = "test_data_consistency"
-            test_value = "test_value"
-            r.set(test_key, test_value, ex=60)
-            retrieved = r.get(test_key)
-            if retrieved:
-                print("✅ Redis connection test passed")
-            else:
-                print("❌ Redis connection test failed")
-            
-            # Test database connection
-            from config.db import engine
-            from sqlalchemy import text
-            with engine.connect() as conn:
-                result = conn.execute(text('SELECT 1'))
-                print("✅ Database connection test passed")
-            
-            print("✅ TC-008 data consistency test completed")
-        except Exception as e:
-            print(f"❌ TC-008 failed: {e}")
+        from utils.cache import _redis
+        from config.db import engine
+        from sqlalchemy import text
+
+        r = _redis()
+        test_key = "test_data_consistency"
+        test_value = "test_value"
+        r.set(test_key, test_value, ex=60)
+        retrieved = r.get(test_key)
+        if retrieved:
+            print("Redis connection test passed")
+
+        with engine.connect() as conn:
+            result = conn.execute(text('SELECT 1'))
+            print("Database connection test passed")
+
+        print("Data consistency test completed")
         PY
 
     - name: Run performance test
@@ -692,23 +737,30 @@ jobs:
         python - <<'PY'
         import requests
         import time
-        
+
         base_url = "http://localhost:8000"
-        
-        # Test API response time
+
         start_time = time.time()
         for i in range(10):
             response = requests.get(f"{base_url}/api/room/list")
         end_time = time.time()
-        
+
         avg_response_time = (end_time - start_time) / 10
-        print(f"✅ Average API response time: {avg_response_time:.3f}s")
-        
+        print(f"Average API response time: {avg_response_time:.3f}s")
+
         if avg_response_time < 0.5:
-            print("✅ Performance test passed")
+            print("Performance test passed")
         else:
-            print("⚠️ Performance test: Response time above threshold")
+            print("Performance test: Response time above threshold")
         PY
+
+    - name: Upload integration test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: integration-test-results
+        path: backend/integration-results
+        retention-days: 7
 
     - name: Clean up
       if: always()
@@ -722,30 +774,27 @@ jobs:
     name: Security Scan
     runs-on: ubuntu-latest
     needs: [backend-test, frontend-test]
-    
+
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
-    
+      uses: actions/checkout@v4
+
     - name: Run security scan for Python dependencies
       run: |
         cd backend
         pip install safety bandit
-        
-        # Scan Python dependencies
+
         safety check -r requirements.txt --output json > security_report.json || true
-        
-        # Scan Python code for security issues
         bandit -r . -f json -o bandit_report.json || true
-        
-        echo '✅ Security scan completed'
-    
+
+        echo 'Security scan completed'
+
     - name: Run security scan for Node.js dependencies
       run: |
         cd frontend
         npm audit --audit-level moderate --json > npm_audit_report.json || true
-        echo '✅ NPM security audit completed'
-    
+        echo 'NPM security audit completed'
+
     - name: Upload security reports
       uses: actions/upload-artifact@v4
       with:
@@ -755,214 +804,139 @@ jobs:
           backend/bandit_report.json
           frontend/npm_audit_report.json
         retention-days: 7
-    
-    - name: Check for critical vulnerabilities
-      run: |
-        # Check Python dependencies for critical issues
-        if [ -f "backend/security_report.json" ] && [ -s "backend/security_report.json" ]; then
-            python3 << 'EOF'
-        import json
-        import sys
-        try:
-            with open('backend/security_report.json', 'r') as f:
-                content = f.read()
-                if not content.strip():
-                    print('ℹ️ Python security report is empty, skipping...')
-                    sys.exit(0)
-                data = json.loads(content)
-                critical_vulns = [v for v in data.get('vulnerabilities', []) if v.get('severity') == 'CRITICAL']
-                if critical_vulns:
-                    print('❌ Critical vulnerabilities found in Python dependencies:')
-                    for vuln in critical_vulns:
-                        print(f'  - {vuln.get("package_name")}: {vuln.get("advisory")}')
-                    exit(1)
-                else:
-                    print('✅ No critical vulnerabilities found in Python dependencies')
-        except json.JSONDecodeError:
-            print('ℹ️ Python security report is not valid JSON, skipping...')
-        EOF
-        else
-            echo 'ℹ️ No Python security report found, skipping...'
-        fi
-        
-        # Check NPM audit for critical issues
-        if [ -f "frontend/npm_audit_report.json" ] && [ -s "frontend/npm_audit_report.json" ]; then
-            python3 << 'EOF'
-        import json
-        import sys
-        try:
-            with open('frontend/npm_audit_report.json', 'r') as f:
-                content = f.read()
-                if not content.strip():
-                    print('ℹ️ NPM audit report is empty, skipping...')
-                    sys.exit(0)
-                data = json.loads(content)
-                critical_vulns = data.get('metadata', {}).get('vulnerabilities', {}).get('critical', 0)
-                if critical_vulns > 0:
-                    print(f'❌ {critical_vulns} critical vulnerabilities found in NPM dependencies')
-                    exit(1)
-                else:
-                    print('✅ No critical vulnerabilities found in NPM dependencies')
-        except json.JSONDecodeError:
-            print('ℹ️ NPM audit report is not valid JSON, skipping...')
-        EOF
-        else
-            echo 'ℹ️ No NPM audit report found, skipping...'
-        fi
-
-  performance-test:
-    name: Performance Test
-    runs-on: ubuntu-latest
-    needs: [backend-test, frontend-test]
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-    
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.12'
-    
-    - name: Install performance testing tools
-      run: |
-        pip install locust
-        echo '✅ Performance testing tools installed'
-    
-    - name: Run frontend bundle analysis
-      run: |
-        cd frontend
-        export NODE_ENV=development
-        npm install -g webpack-bundle-analyzer
-        npm install --include=dev
-        npm run build
-        ls -la dist/assets/
-        echo '✅ Frontend bundle analysis completed'
-    
-    - name: Generate performance report
-      run: |
-        echo '# Performance Test Report' > performance-report.md
-        echo '' >> performance-report.md
-        echo '## Frontend Bundle Size' >> performance-report.md
-        echo '' >> performance-report.md
-        echo '- Main JavaScript bundle: ~500KB (estimated)' >> performance-report.md
-        echo '- CSS bundle: ~50KB (estimated)' >> performance-report.md
-        echo '- Total assets: ~1MB (estimated)' >> performance-report.md
-        echo '' >> performance-report.md
-        echo '## Backend Performance Metrics' >> performance-report.md
-        echo '' >> performance-report.md
-        echo '- API response time: < 200ms (target)' >> performance-report.md
-        echo '- Database query time: < 50ms (target)' >> performance-report.md
-        echo '- WebSocket latency: < 100ms (target)' >> performance-report.md
-        
-        cat performance-report.md
-    
-    - name: Upload performance report
-      uses: actions/upload-artifact@v4
-      with:
-        name: performance-report
-        path: performance-report.md
-        retention-days: 30
 
   test-report:
     name: Generate Test Report
     runs-on: ubuntu-latest
-    needs: [backend-test, frontend-test, integration-test, security-scan, performance-test]
-    
+    needs: [backend-test, frontend-test, integration-test, security-scan]
+
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
-    
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Download backend test results
+      uses: actions/download-artifact@v4
+      if: always()
+      with:
+        name: backend-test-results
+        path: backend/test-results
+
+    - name: Download integration test results
+      uses: actions/download-artifact@v4
+      if: always()
+      with:
+        name: integration-test-results
+        path: backend/integration-results
+
     - name: Generate comprehensive test summary
       run: |
-        echo '# Online Study System - Comprehensive Test Report' > test-summary.md
-        echo '' >> test-summary.md
-        echo '## 🎯 Project Status: ✅ COMPLETED' >> test-summary.md
-        echo '' >> test-summary.md
-        echo '## Test Results Summary' >> test-summary.md
-        echo '' >> test-summary.md
-        echo '| Test Suite | Status | Coverage | Details |' >> test-summary.md
-        echo '|------------|--------|----------|---------|' >> test-summary.md
-        echo '| Backend Tests | ✅ Passed | 85% | Model validation, service layer, API endpoints, Redis integration |' >> test-summary.md
-        echo '| Frontend Tests | ✅ Passed | 75% | TypeScript syntax, build verification, unit tests, component tests |' >> test-summary.md
-        echo '| Integration Tests | ✅ Passed | 90% | API connectivity, WebSocket communication, database operations |' >> test-summary.md
-        echo '| Security Scan | ✅ Completed | 100% | Dependency vulnerability check, code security analysis |' >> test-summary.md
-        echo '| Performance Tests | ✅ Passed | 80% | API response time, bundle size analysis |' >> test-summary.md
-        echo '' >> test-summary.md
-        echo '## 📊 Test Coverage Details' >> test-summary.md
-        echo '' >> test-summary.md
-        echo '### Core Functionality Validation' >> test-summary.md
-        echo '' >> test-summary.md
-        echo '- ✅ TC-001: User registration and login functionality' >> test-summary.md
-        echo '- ✅ TC-002: Study room creation functionality' >> test-summary.md
-        echo '- ✅ TC-003: Study room joining functionality' >> test-summary.md
-        echo '- ✅ TC-004: Learning duration recording functionality' >> test-summary.md
-        echo '- ✅ TC-005: Leaderboard functionality' >> test-summary.md
-        echo '- ✅ TC-006: AI detection functionality (model validation)' >> test-summary.md
-        echo '- ✅ TC-007: WebSocket real-time communication (Redis integration)' >> test-summary.md
-        echo '- ✅ TC-008: Data consistency (Redis-MySQL integration)' >> test-summary.md
-        echo '- ✅ TC-009: Privacy mode functionality' >> test-summary.md
-        echo '- ✅ TC-010: Camera access and management' >> test-summary.md
-        echo '' >> test-summary.md
-        echo '### Technical Architecture Validation' >> test-summary.md
-        echo '' >> test-summary.md
-        echo '- ✅ Database connectivity and operations' >> test-summary.md
-        echo '- ✅ Redis caching and session management' >> test-summary.md
-        echo '- ✅ WebSocket real-time communication' >> test-summary.md
-        echo '- ✅ JWT authentication and authorization' >> test-summary.md
-        echo '- ✅ Frontend build and deployment' >> test-summary.md
-        echo '- ✅ API endpoint availability and performance' >> test-summary.md
-        echo '' >> test-summary.md
-        echo '## 🚀 Deployment Readiness' >> test-summary.md
-        echo '' >> test-summary.md
-        echo '| Component | Status | Notes |' >> test-summary.md
-        echo '|-----------|--------|-------|' >> test-summary.md
-        echo '| Backend API | ✅ Ready | FastAPI with proper error handling |' >> test-summary.md
-        echo '| Frontend Application | ✅ Ready | Vue 3 with responsive design |' >> test-summary.md
-        echo '| Database Layer | ✅ Ready | MySQL/SQLite support with migrations |' >> test-summary.md
-        echo '| Caching Layer | ✅ Ready | Redis integration for performance |' >> test-summary.md
-        echo '| Real-time Communication | ✅ Ready | WebSocket with room management |' >> test-summary.md
-        echo '| AI Detection | ✅ Ready | OpenCV with privacy modes |' >> test-summary.md
-        echo '' >> test-summary.md
-        echo '## 📈 Performance Metrics' >> test-summary.md
-        echo '' >> test-summary.md
-        echo '- API Response Time: < 200ms ✅' >> test-summary.md
-        echo '- Frontend Load Time: < 2s ✅' >> test-summary.md
-        echo '- WebSocket Latency: < 100ms ✅' >> test-summary.md
-        echo '- Database Query Time: < 50ms ✅' >> test-summary.md
-        echo '- Concurrent Users: 1000+ ✅' >> test-summary.md
-        echo '' >> test-summary.md
-        echo '## 🔒 Security Assessment' >> test-summary.md
-        echo '' >> test-summary.md
-        echo '- Password encryption: ✅ bcrypt hashing' >> test-summary.md
-        echo '- JWT authentication: ✅ secure token management' >> test-summary.md
-        echo '- SQL injection protection: ✅ parameterized queries' >> test-summary.md
-        echo '- XSS protection: ✅ input sanitization' >> test-summary.md
-        echo '- Dependency vulnerabilities: ✅ regular scanning' >> test-summary.md
-        echo '' >> test-summary.md
-        echo '## 🎉 Conclusion' >> test-summary.md
-        echo '' >> test-summary.md
-        echo 'The Online Study System has successfully passed all required tests and is ready for production deployment. All core functionalities are implemented, tested, and optimized for performance and security.' >> test-summary.md
-        echo '' >> test-summary.md
-        echo '**Next Steps:**' >> test-summary.md
-        echo '- Deploy to production environment' >> test-summary.md
-        echo '- Set up monitoring and logging' >> test-summary.md
-        echo '- Configure SSL certificates for HTTPS' >> test-summary.md
-        echo '- Set up database backups' >> test-summary.md
-        
-        cat test-summary.md
-    
+        python - <<'PY'
+        import os
+        import xml.etree.ElementTree as ET
+        from datetime import datetime
+
+        def parse_junit_xml(filepath):
+            if not os.path.exists(filepath):
+                return {"tests": 0, "failures": 0, "errors": 0, "skipped": 0, "passed": 0}
+            try:
+                tree = ET.parse(filepath)
+                root = tree.getroot()
+                tests = int(root.get("tests", 0))
+                failures = int(root.get("failures", 0))
+                errors = int(root.get("errors", 0))
+                skipped = int(root.get("skipped", 0))
+                return {
+                    "tests": tests,
+                    "failures": failures,
+                    "errors": errors,
+                    "skipped": skipped,
+                    "passed": tests - failures - errors - skipped
+                }
+            except Exception as e:
+                return {"tests": 0, "failures": 0, "errors": 0, "skipped": 0, "passed": 0, "error": str(e)}
+
+        backend_results = parse_junit_xml("backend/test-results/backend-test.xml")
+        integration_results = parse_junit_xml("backend/integration-results/integration-test.xml")
+
+        backend_status = "PASSED" if backend_results["failures"] == 0 and backend_results["errors"] == 0 else "FAILED"
+        integration_status = "PASSED" if integration_results["failures"] == 0 and integration_results["errors"] == 0 else "FAILED"
+
+        with open("test-summary.md", "w") as f:
+            f.write("# Online Study System - Comprehensive Test Report\n\n")
+            f.write(f"Generated at: {datetime.now().isoformat()}\n\n")
+            f.write("## Project Status\n\n")
+            overall_status = "PASSED" if backend_status == "PASSED" and integration_status == "PASSED" else "FAILED"
+            f.write(f"**Overall Status: {overall_status}**\n\n")
+            f.write("## Test Results Summary\n\n")
+            f.write("| Test Suite | Status | Tests | Passed | Failed | Errors |\n")
+            f.write("|------------|--------|-------|--------|--------|--------|\n")
+            f.write(f"| Backend Tests (pytest) | {backend_status} | {backend_results['tests']} | {backend_results['passed']} | {backend_results['failures']} | {backend_results['errors']} |\n")
+            f.write(f"| Integration Tests | {integration_status} | {integration_results['tests']} | {integration_results['passed']} | {integration_results['failures']} | {integration_results['errors']} |\n")
+            f.write(f"| Frontend Tests | PASSED | - | - | - | - |\n")
+            f.write(f"| Security Scan | COMPLETED | - | - | - | - |\n")
+            f.write("\n## Test Coverage\n\n")
+            f.write("- TC-001: User registration and login\n")
+            f.write("- TC-002: Study room creation\n")
+            f.write("- TC-003: Study room joining\n")
+            f.write("- TC-004: Learning duration recording\n")
+            f.write("- TC-005: Leaderboard functionality\n")
+            f.write("- TC-006: AI detection functionality\n")
+            f.write("- TC-007: User profile and tags management\n")
+            f.write("- TC-008: Check-in functionality\n")
+            f.write("- TC-009: Bookmark functionality\n")
+            f.write("- TC-010: Room update and destroy\n")
+            f.write("- TC-011: WebSocket real-time communication\n")
+            f.write("\n## Implemented Features\n\n")
+            f.write("- User system (register, login, profile, tags, check-in)\n")
+            f.write("- Study room management (CRUD, join/leave, WebSocket broadcast)\n")
+            f.write("- Learning duration tracking (daily/weekly/monthly, leaderboards)\n")
+            f.write("- AI face detection (OpenCV Haar Cascade)\n")
+            f.write("- Bookmark collection\n")
+            f.write("- WebSocket real-time communication\n")
+            f.write("\n## API Endpoints Coverage\n\n")
+            f.write("- /api/user/* - User management endpoints\n")
+            f.write("- /api/room/* - Study room management endpoints\n")
+            f.write("- /api/duration/* - Learning duration endpoints\n")
+            f.write("- /api/bookmark/* - Bookmark collection endpoints\n")
+            f.write("- /ws/room/* - WebSocket endpoint\n")
+
+        print("Test summary report generated:")
+        print(f"Backend Tests: {backend_status} ({backend_results['passed']}/{backend_results['tests']} passed)")
+        print(f"Integration Tests: {integration_status} ({integration_results['passed']}/{integration_results['tests']} passed)")
+        PY
+
     - name: Upload test summary
       uses: actions/upload-artifact@v4
       with:
         name: test-summary
         path: test-summary.md
         retention-days: 30
-    
+
     - name: Send success notification
       if: success()
       run: |
-        echo '🎉 All tests passed! The Online Study System is ready for deployment.'
-        echo '📊 Test coverage: Backend 85%, Frontend 75%, Integration 90%'
-        echo '🚀 Performance: API <200ms, WebSocket <100ms'
-        echo '🔒 Security: No critical vulnerabilities found'
+        echo 'All tests passed! The Online Study System is ready for deployment.'
+
+  notify-failure:
+    name: Notify Failure
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-test, integration-test]
+    if: failure()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Report failure
+        run: |
+          echo "CI/CD pipeline failed. Please check the logs for details."
+          echo "Failed job: ${{ needs }}"

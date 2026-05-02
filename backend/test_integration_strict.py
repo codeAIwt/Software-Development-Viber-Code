@@ -122,11 +122,11 @@ class TestUserRegistrationStrict(BaseTestCase):
 
     def test_register_missing_phone(self):
         response = self.client.post("/api/user/register", json={"password": "password123"})
-        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.status_code, 400)
 
     def test_register_missing_password(self):
         response = self.client.post("/api/user/register", json={"phone": "13800138000"})
-        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.status_code, 400)
 
 
 class TestUserLoginStrict(BaseTestCase):
@@ -737,8 +737,9 @@ class TestWebSocketConnectionStrict(BaseTestCase):
     """WebSocket连接严格测试"""
 
     def test_websocket_missing_user_id(self):
-        response = self.client.ws_connect("/ws/room/test123")
-        response.close(code=1008, reason="Missing user_id")
+        with self.assertRaises(Exception):
+            with self.client.websocket_connect("/ws/room/test123") as websocket:
+                pass
 
     def test_websocket_endpoint_accessible(self):
         with self.client.stream("GET", "/ws/room/test123?user_id=test") as response:

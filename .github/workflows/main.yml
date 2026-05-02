@@ -371,8 +371,8 @@ jobs:
                 else:
                     assert_response_ok(response, "TC-002 Create Room")
                     room_result = response.json().get("data", {})
-                    assert "id" in room_result, "TC-002: room id not in response"
-                    test_room_id = room_result.get("id", "")
+                    assert "room_id" in room_result, "TC-002: room_id not in response"
+                    test_room_id = room_result.get("room_id", "")
                     print(f"TC-002: Room creation passed, room_id: {test_room_id}")
             except Exception as e:
                 failed_tests.append(f"TC-002 exception: {e}")

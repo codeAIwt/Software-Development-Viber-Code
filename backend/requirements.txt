@@ -1,22 +1,20 @@
-fastapi>=0.110.0
+fastapi>=0.115.0
 uvicorn[standard]>=0.27.0
 sqlalchemy>=2.0.0
 pymysql>=1.1.0
 redis>=5.0.0
 fakeredis>=2.20.0
 python-jose[cryptography]>=3.3.0
-pydantic
+pydantic>=2.0.0
 pydantic-settings>=2.2.0
 python-multipart
 passlib[bcrypt]
 python-dotenv
 opencv-python>=4.8.0
 numpy>=1.24.0
-# 上述机器学习相关包（torch/torchvision/pillow）在当前后端实现中为可选。
-# ai_service.py 目前使用 OpenCV Haar 级联与 numpy；如需深度学习模型请手动添加下面的包：
-# torch>=2.0.0
-# torchvision>=0.15.0
 pillow>=10.0.0
 pytest>=8.0.0
 pytest-cov>=4.0.0
 pytest-asyncio>=0.23.0
+httpx
+websockets>=12.0

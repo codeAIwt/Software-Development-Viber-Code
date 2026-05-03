@@ -352,9 +352,11 @@ def get_weekly_rank_list(db: Session, week_start_date: date, limit: int = 10) ->
     rank_items = []
     for user_id, total_minutes in user_totals.items():
         if total_minutes > 0:
-            # 计算击败百分比
             less_count = len([u for u, t in user_totals.items() if t < total_minutes and t > 0])
-            beat_percent = round((less_count / (effective_users - 1)) * 100, 2)
+            if effective_users == 1:
+                beat_percent = 100.0
+            else:
+                beat_percent = round((less_count / (effective_users - 1)) * 100, 2)
 
             rank_items.append({
                 "user_id": user_id,

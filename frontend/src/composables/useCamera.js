@@ -1,5 +1,6 @@
 import { ref } from 'vue';
 import { startCamera as startCameraApi, stopCamera as stopCameraApi, checkCameraPermission } from '../utils/video';
+import { createProcessedStream, stopProcessedStream, PrivacyMode } from '../utils/videoProcessor';
 
 export function useCamera() {
     const videoRef = ref(null);
@@ -8,12 +9,14 @@ export function useCamera() {
     const cameraOn = ref(true);
     const cameraError = ref(false);
     const cameraLoading = ref(false);
-    const privacyMode = ref('off');
+    const privacyMode = ref(PrivacyMode.OFF);
+    const cachedProcessedStream = ref(null);
+    const cachedPrivacyMode = ref(PrivacyMode.OFF);
 
     const privacyModes = [
-        { value: 'off', label: '关闭隐私模式' },
-        { value: 'blur', label: '模糊模式' },
-        { value: 'hand', label: '手部遮挡模式' }
+        { value: PrivacyMode.OFF, label: '关闭隐私模式' },
+        { value: PrivacyMode.BLUR, label: '模糊模式' },
+        { value: PrivacyMode.HAND, label: '全屏遮挡模式' }
     ];
 
     function setRefs(video, canvas) {
@@ -31,7 +34,6 @@ export function useCamera() {
             }
             const stream = await startCameraApi(videoRef.value);
             localStream.value = stream;
-            applyPrivacyMode();
         } catch (error) {
             cameraError.value = true;
             throw error;
@@ -43,52 +45,51 @@ export function useCamera() {
     function stopCamera() {
         try {
             stopCameraApi();
+            stopProcessedStream();
         } finally {
             localStream.value = null;
             cameraOn.value = false;
+            cachedProcessedStream.value = null;
         }
-    }
-
-    function applyPrivacyMode() {
-        if (!videoRef.value || !canvasRef.value) return;
-
-        const video = videoRef.value;
-        const canvas = canvasRef.value;
-        const ctx = canvas.getContext('2d');
-
-        canvas.width = video.videoWidth || 640;
-        canvas.height = video.videoHeight || 480;
-
-        let rafId = null;
-
-        function draw() {
-            if (!cameraOn.value) return;
-            try {
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                if (privacyMode.value === 'blur') {
-                    ctx.filter = 'blur(10px)';
-                    ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height);
-                    ctx.filter = 'none';
-                } else if (privacyMode.value === 'hand') {
-                    ctx.fillStyle = 'black';
-                    ctx.fillRect(0, 0, canvas.width, canvas.height * 0.6);
-                }
-            } catch (err) {
-                // ignore drawing errors
-            }
-            rafId = requestAnimationFrame(draw);
-        }
-
-        draw();
-
-        return () => {
-            if (rafId) cancelAnimationFrame(rafId);
-        };
     }
 
     function changePrivacyMode(mode) {
+        console.log('[useCamera] changePrivacyMode:', mode);
         privacyMode.value = mode;
-        applyPrivacyMode();
+        if (canvasRef.value && videoRef.value) {
+            requestAnimationFrame(() => {
+                if (canvasRef.value && videoRef.value) {
+                    createProcessedStream(videoRef.value, canvasRef.value, mode);
+                    cachedProcessedStream.value = null;
+                }
+            });
+        }
+    }
+
+    function getStreamForWebRTC() {
+        console.log('[useCamera] getStreamForWebRTC called, privacyMode:', privacyMode.value);
+
+        if (privacyMode.value === PrivacyMode.OFF) {
+            cachedProcessedStream.value = null;
+            cachedPrivacyMode.value = PrivacyMode.OFF;
+            console.log('[useCamera] returning localStream:', localStream.value?.id);
+            return localStream.value;
+        }
+
+        if (canvasRef.value && videoRef.value) {
+            if (cachedProcessedStream.value && cachedPrivacyMode.value === privacyMode.value) {
+                console.log('[useCamera] returning cachedProcessedStream:', cachedProcessedStream.value?.id);
+                return cachedProcessedStream.value;
+            }
+            console.log('[useCamera] creating new processed stream, mode:', privacyMode.value);
+            cachedProcessedStream.value = createProcessedStream(videoRef.value, canvasRef.value, privacyMode.value);
+            cachedPrivacyMode.value = privacyMode.value;
+            console.log('[useCamera] new processed stream id:', cachedProcessedStream.value?.id);
+            return cachedProcessedStream.value;
+        }
+
+        console.log('[useCamera] returning localStream (fallback):', localStream.value?.id);
+        return localStream.value;
     }
 
     return {
@@ -103,7 +104,7 @@ export function useCamera() {
         setRefs,
         initCamera,
         stopCamera,
-        applyPrivacyMode,
         changePrivacyMode,
+        getStreamForWebRTC,
     };
 }

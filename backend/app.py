@@ -13,48 +13,13 @@ from services import room_service
 from config.db import SessionLocal
 from starlette.concurrency import run_in_threadpool
 
+from ws.server import handle_websocket_session
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     yield
-
-
-class ConnectionManager:
-    def __init__(self):
-        # room_id -> {user_id: WebSocket}
-        self.active_connections: dict[str, dict[str, WebSocket]] = {}
-
-    async def connect(self, websocket: WebSocket, room_id: str, user_id: str):
-        await websocket.accept()
-        if room_id not in self.active_connections:
-            self.active_connections[room_id] = {}
-        self.active_connections[room_id][user_id] = websocket
-        
-        # 通知房间内其他用户有新用户加入
-        await self.broadcast(room_id, {
-            "type": "user_join",
-            "user_id": user_id
-        }, exclude_user=user_id)
-
-    def disconnect(self, room_id: str, user_id: str):
-        if room_id in self.active_connections and user_id in self.active_connections[room_id]:
-            del self.active_connections[room_id][user_id]
-            if not self.active_connections[room_id]:
-                del self.active_connections[room_id]
-
-    async def broadcast(self, room_id: str, message: dict, exclude_user: str = None):
-        if room_id in self.active_connections:
-            for user_id, connection in self.active_connections[room_id].items():
-                if user_id != exclude_user:
-                    await connection.send_json(message)
-
-    async def send_personal_message(self, room_id: str, user_id: str, message: dict):
-        if room_id in self.active_connections and user_id in self.active_connections[room_id]:
-            await self.active_connections[room_id][user_id].send_json(message)
-
-
-manager = ConnectionManager()
 
 
 def create_app() -> FastAPI:
@@ -89,45 +54,23 @@ def create_app() -> FastAPI:
         if not user_id:
             await websocket.close(code=1008, reason="Missing user_id")
             return
-        
-        await manager.connect(websocket, room_id, user_id)
-        
-        try:
-            while True:
-                data = await websocket.receive_json()
-                message_type = data.get("type")
-                
-                if message_type in ["offer", "answer", "ice_candidate"]:
-                    # 转发信令消息
-                    target_user_id = data.get("target_user_id")
-                    if target_user_id:
-                        await manager.send_personal_message(
-                            room_id,
-                            target_user_id,
-                            {
-                                "type": message_type,
-                                "user_id": user_id,
-                                "data": data.get("data")
-                            }
-                        )
-        except WebSocketDisconnect:
-            manager.disconnect(room_id, user_id)
-            # WebSocket断开时自动leave_room
-            try:
-                db = SessionLocal()
-                try:
-                    # room_service.leave_room 是同步阻塞函数，在线程池中执行
-                    await run_in_threadpool(room_service.leave_room, db, user_id, room_id)
-                finally:
-                    db.close()
-            except Exception as e:
-                print(f"Error during websocket disconnect cleanup: {e}")
 
-            # 通知房间内其他用户有用户离开
-            await manager.broadcast(room_id, {
-                "type": "user_leave",
-                "user_id": user_id
-            })
+        try:
+            await handle_websocket_session(websocket, room_id, user_id)
+        except WebSocketDisconnect:
+            pass
+
+        await manager.broadcast_user_leave(room_id, user_id)
+        manager.disconnect(room_id, user_id)
+
+        try:
+            db = SessionLocal()
+            try:
+                await run_in_threadpool(room_service.leave_room, db, user_id, room_id)
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"Error during websocket disconnect cleanup: {e}")
 
     app.include_router(user_router, prefix="/api/user", tags=["user"])
     app.include_router(room_router, prefix="/api/room", tags=["room"])

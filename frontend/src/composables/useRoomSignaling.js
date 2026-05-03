@@ -1,7 +1,8 @@
+import { ref } from 'vue';
 import { useWebSocket } from './useWebSocket';
 import { useWebRTC } from './useWebRTC';
 
-export function useRoomSignaling(getLocalStream) {
+export function useRoomSignaling(getProcessedStream) {
     const { ws, connect, send, close } = useWebSocket();
     const {
         peerConnections,
@@ -11,44 +12,53 @@ export function useRoomSignaling(getLocalStream) {
         handleAnswer,
         handleIceCandidate,
         cleanupPeerConnections,
-    } = useWebRTC((signal) => send(signal), getLocalStream);
+    } = useWebRTC((signal) => send(signal), getProcessedStream);
+
+    const aiDetectionResults = ref({});
 
     function handleMessage(message) {
         const { type, user_id, data } = message || {};
-        console.log('[useRoomSignaling] message type:', type, 'user_id:', user_id);
         switch (type) {
             case 'user_join':
-                console.debug('[useRoomSignaling] user_join', user_id);
                 handleUserJoin(user_id);
                 break;
             case 'user_leave': {
-                console.debug('[useRoomSignaling] user_leave', user_id);
                 const pc = peerConnections.value[user_id];
                 if (pc) {
                     try { pc.close(); } catch (e) { }
                     delete peerConnections.value[user_id];
                 }
                 delete videoStreams.value[user_id];
+                delete aiDetectionResults.value[user_id];
                 break;
             }
             case 'room_closed':
-                console.debug('[useRoomSignaling] room_closed', data);
                 break;
             case 'offer':
-                console.log('[useRoomSignaling] receiving offer from', user_id);
                 handleOffer(user_id, data);
                 break;
             case 'answer':
-                console.log('[useRoomSignaling] receiving answer from', user_id);
                 handleAnswer(user_id, data);
                 break;
             case 'ice_candidate':
-                console.log('[useRoomSignaling] receiving ice_candidate from', user_id);
                 handleIceCandidate(user_id, data);
                 break;
-            default:
-            // noop
+            case 'ai_detection':
+                if (user_id) {
+                    aiDetectionResults.value = {
+                        ...aiDetectionResults.value,
+                        [user_id]: data
+                    };
+                }
+                break;
         }
+    }
+
+    function sendAiDetection(detectionData) {
+        send({
+            type: 'ai_detection',
+            data: detectionData
+        });
     }
 
     function connectRoom(roomId, userId, handlers = {}) {
@@ -60,10 +70,10 @@ export function useRoomSignaling(getLocalStream) {
             },
             onMessage: (message) => {
                 if (message?.type === 'room_closed') {
-                    try { handleMessage(message); } catch (e) { console.error('handleMessage', e); }
+                    try { handleMessage(message); } catch (e) { }
                     onRoomClosed?.(message);
                 } else {
-                    try { handleMessage(message); } catch (e) { console.error('handleMessage', e); }
+                    try { handleMessage(message); } catch (e) { }
                     onMessage?.(message);
                 }
             },
@@ -78,15 +88,18 @@ export function useRoomSignaling(getLocalStream) {
     function closeRoom() {
         try { close(); } catch (e) { }
         try { cleanupPeerConnections(); } catch (e) { }
+        aiDetectionResults.value = {};
     }
 
     return {
         ws,
         videoStreams,
         peerConnections,
+        aiDetectionResults,
         connectRoom,
         closeRoom,
         sendSignal: send,
+        sendAiDetection,
         cleanupPeerConnections,
     };
 }

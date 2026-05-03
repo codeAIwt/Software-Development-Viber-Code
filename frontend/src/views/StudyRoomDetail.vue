@@ -6,10 +6,9 @@ import * as studyRoomApi from '../api/studyRoom';
 import * as userApi from '../api/user';
 import { useUiStore } from '../store';
 
-import { useCamera } from '../composables/useCamera';
+import { createRoomManager } from '../services/roomManager';
 import { useRoomData } from '../composables/useRoomData';
 import { useAiDetection } from '../composables/useAiDetection';
-import { useRoomSignaling } from '../composables/useRoomSignaling';
 import BookmarkPanel from '../components/BookmarkPanel.vue';
 
 const route = useRoute();
@@ -52,11 +51,15 @@ const {
   destroyRoom: destroyRoomApi,
 } = useRoomData();
 
-// camera composable
-const camera = useCamera();
+// room manager (video stream + webrtc + signaling)
+const roomManager = createRoomManager();
+
+// camera shortcuts
+const camera = roomManager.videoStreamManager;
+const remoteStreams = roomManager.remoteStreams;
 
 // signaling (websocket + webRTC)
-const { videoStreams, peerConnections, connectRoom, closeRoom, sendSignal, cleanupPeerConnections } = useRoomSignaling(() => camera.localStream.value);
+const aiDetectionResults = roomManager.aiDetectionResults;
 
 // 房间关闭时的处理函数
 async function handleRoomClosed() {
@@ -64,9 +67,6 @@ async function handleRoomClosed() {
   isLeaving.value = true;
   ai.stop();
   stopPolling();
-  // camera.stopCamera(); // 暂时禁用
-  // closeRoom(); // 暂时禁用
-  // cleanupPeerConnections(); // 暂时禁用
   try {
     const res = await leaveRoom(route.params.id);
     const data = res.data;
@@ -91,16 +91,14 @@ const ai = useAiDetection({
   roomIdGetter: () => route.params.id,
   userIdGetter: () => currentUserId.value,
   onNoPerson: async () => { await onLeave('ai_detect'); },
+  onDetectionResult: (result) => {
+    roomManager.sendAiDetection(result);
+  },
 });
 
 // computed
 const videoGridClass = computed(() => {
-  const count = roomInfo.value.users.length;
-  if (count === 1) return 'video-grid-1';
-  if (count === 2) return 'video-grid-2';
-  if (count === 3 || count === 4) return 'video-grid-4';
-  if (count === 5 || count === 6) return 'video-grid-6';
-  return 'video-grid-8';
+  return '';
 });
 
 const isCreator = computed(() => currentUserId.value === roomInfo.value.creator_id);
@@ -148,7 +146,6 @@ async function onLeave(type = 'leave') {
   leaveLoading.value = true;
   try {
     ai.stop();
-    camera.stopCamera();
     stopPolling();
     const res = await leaveRoom(roomId);
     const data = res.data;
@@ -159,6 +156,7 @@ async function onLeave(type = 'leave') {
     }
     const duration = data.data.study_duration_minutes || data.data.study_duration || 0;
     ui.setPendingDuration({ duration, type });
+    roomManager.disconnectRoom();
     router.push('/study-room');
   } catch (e) {
     ui.showToast(e.response?.data?.msg || e.message || '退出失败');
@@ -174,9 +172,7 @@ async function updateTheme() {
   if (!newTheme.value) { ui.showToast('请选择主题'); return; }
   updatingTheme.value = true;
   try {
-    console.debug('[StudyRoomDetail] updateTheme: sending update', { roomId: route.params.id, theme: newTheme.value });
     const { data } = await updateRoom(route.params.id, newTheme.value);
-    console.debug('[StudyRoomDetail] updateTheme: response', data);
     if (data.code === 200) {
       Object.assign(roomInfo.value, data.data);
       ui.showToast('主题修改成功');
@@ -194,15 +190,11 @@ function closeDestroyDialog() { showDestroyDialog.value = false; }
 async function destroyRoom() {
   destroying.value = true;
   try {
-    console.debug('[StudyRoomDetail] destroyRoom: sending destroy', { roomId: route.params.id });
     stopPolling();
     const { data } = await destroyRoomApi(route.params.id);
-    console.debug('[StudyRoomDetail] destroyRoom: response', data);
     if (data.code === 200) {
       ai.stop();
-      camera.stopCamera();
-      closeRoom();
-      cleanupPeerConnections();
+      roomManager.disconnectRoom();
       const allUsers = data.data.users || [];
       const myDuration = allUsers.find(u => u.user_id === currentUserId.value);
       ui.setPendingDuration({
@@ -232,25 +224,15 @@ async function fetchCurrentUserInfo() {
 // pagehide handler - 由于无法可靠地区分刷新和关闭标签页
 // 我们选择不发送 leave 请求，依赖后端超时机制来清理用户
 function handlePageHide(event) {
-  console.log('[pagehide] 触发, persisted=', event.persisted, 'isMounted=', isMounted);
   if (!isMounted) {
-    console.log('[pagehide] 组件已卸载，跳过清理');
     return;
   }
-  // 停止所有组件
   stopPolling();
-  camera.stopCamera();
-  closeRoom();
-  cleanupPeerConnections();
-  console.log('[pagehide] 组件已清理');
-  // 不再发送 leave 请求，依赖后端超时机制
+  roomManager.disconnectRoom();
 }
 
 onMounted(async () => {
   isMounted = true;
-  console.log('[onMounted] 组件挂载');
-
-  // 立即启动计时器，不依赖摄像头
   timer.value = setInterval(() => { currentTime.value = Date.now(); }, 1000);
 
   await fetchCurrentUserInfo();
@@ -258,32 +240,26 @@ onMounted(async () => {
   if (res && res.closed) { ui.showToast('房间已关闭'); router.push('/study-room'); return; }
   await camera.initCamera();
 
-  // init signaling (websocket + webRTC)
   const roomId = route.params.id;
   const userId = currentUserId.value;
-  connectRoom(roomId, userId, { onError: (e) => console.error(e), onRoomClosed: handleRoomClosed });
+  roomManager.connectRoom(roomId, userId, { onError: (e) => console.error(e), onRoomClosed: handleRoomClosed });
 
-  // start polling with callback - 当检测到房间关闭时跳转
   startPolling(route.params.id, 5000, handleRoomClosed, () => isLeaving.value);
 
   ai.start();
 
-  // 添加pagehide事件监听 - 用于组件清理
   window.addEventListener('pagehide', handlePageHide);
 });
 
 onUnmounted(() => {
   isMounted = false;
-  console.log('[onUnmounted] 组件卸载');
   if (timer.value) clearInterval(timer.value);
   ai.stop();
-  closeRoom();
-  cleanupPeerConnections();
+  roomManager.disconnectRoom();
   stopPolling();
   try {
     window.removeEventListener('pagehide', handlePageHide);
   } catch (err) {}
-  camera.stopCamera();
 });
 </script>
 
@@ -399,15 +375,21 @@ onUnmounted(() => {
 
         <!-- 远程视频 -->
         <div
-          v-for="(stream, userId) in videoStreams"
+          v-for="(stream, userId) in remoteStreams"
           :key="userId"
           class="video-item"
         >
           <div class="video-header">
             <span>{{ userInfoMap.get(userId)?.nickname || userId }}</span>
+            <span
+              class="ai-status-badge"
+              :class="getAiStatusClass(aiDetectionResults[userId], false, 0)"
+            >
+              {{ getAiStatusText(aiDetectionResults[userId], false, 0) }}
+            </span>
           </div>
           <video
-            :ref="el => { if (el && stream && stream.getAudioTracks) el.srcObject = stream }"
+            :ref="el => { if (el) { if (stream && stream.getVideoTracks) el.srcObject = stream; else el.srcObject = null; } }"
             class="remote-video"
             autoplay
             playsinline
@@ -968,38 +950,13 @@ h3 {
   color: #6b7280;
 }
 
-/* 视频网格布局 */
+/* 视频网格布局 - 固定宽度+自动换行 */
 .video-grid {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 12px;
   width: 100%;
-  min-height: 300px;
-}
-
-.video-grid-1 {
-  grid-template-columns: 1fr;
-  grid-template-rows: 1fr;
-}
-
-.video-grid-2 {
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr;
-}
-
-.video-grid-4 {
-  grid-template-columns: repeat(2, 1fr);
-  grid-template-rows: repeat(2, 1fr);
-}
-
-.video-grid-6 {
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(2, 1fr);
-}
-
-.video-grid-8 {
-  grid-template-columns: repeat(4, 1fr);
-  grid-template-rows: repeat(2, 1fr);
 }
 
 .video-item {
@@ -1012,6 +969,9 @@ h3 {
   flex-direction: column;
   box-shadow: 0 2px 6px rgba(28, 37, 51, 0.04);
   transition: box-shadow 0.2s ease;
+  width: 320px;
+  height: 240px;
+  flex-shrink: 0;
 }
 
 .video-item:hover {
@@ -1106,6 +1066,7 @@ h3 {
   height: 100%;
   object-fit: cover;
   flex: 1;
+  display: block;
 }
 
 p {

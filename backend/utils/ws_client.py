@@ -1,46 +1,51 @@
 """
-WebSocket 连接侧工具：维护 `user_id` / `room_id` → 连接句柄 映射，供 `ws/server` 定向推送。
+WebSocket 连接管理器 - 统一实现
+维护 room_id -> user_id -> WebSocket 连接映射
 """
 
 from __future__ import annotations
 
-from typing import Dict, Set
+from typing import Dict
 from fastapi import WebSocket
 
 
 class ConnectionManager:
     def __init__(self):
-        # Maps user_id -> WebSocket connection
-        self.active_connections: Dict[str, WebSocket] = {}
-        # Maps room_id -> set of user_id
-        self.room_users: Dict[str, Set[str]] = {}
+        self.active_connections: Dict[str, Dict[str, WebSocket]] = {}
 
-    def register_connection(self, user_id: str, connection: WebSocket) -> None:
-        """用户上线时登记连接。"""
-        self.active_connections[user_id] = connection
+    async def connect(self, websocket: WebSocket, room_id: str, user_id: str) -> None:
+        await websocket.accept()
+        if room_id not in self.active_connections:
+            self.active_connections[room_id] = {}
+        self.active_connections[room_id][user_id] = websocket
 
-    def unregister_connection(self, user_id: str) -> None:
-        """断开时移除。"""
-        self.active_connections.pop(user_id, None)
-        # Check and remove the user from any rooms they were registered in
-        for room_id, users in self.room_users.items():
-            if user_id in users:
-                users.discard(user_id)
+    def disconnect(self, room_id: str, user_id: str) -> None:
+        if room_id in self.active_connections and user_id in self.active_connections[room_id]:
+            del self.active_connections[room_id][user_id]
+            if not self.active_connections[room_id]:
+                del self.active_connections[room_id]
 
-    def bind_user_room(self, user_id: str, room_id: str) -> None:
-        """用户进入房间会话时绑定 room 上下文。"""
-        if room_id not in self.room_users:
-            self.room_users[room_id] = set()
-        self.room_users[room_id].add(user_id)
+    async def broadcast(self, room_id: str, message: dict, exclude_user: str = None) -> None:
+        if room_id in self.active_connections:
+            for user_id, connection in self.active_connections[room_id].items():
+                if user_id != exclude_user:
+                    await connection.send_json(message)
 
-    def unbind_user_room(self, user_id: str, room_id: str) -> None:
-        """离开房间时解除绑定。"""
-        if room_id in self.room_users:
-            self.room_users[room_id].discard(user_id)
-            # Cleanup empty rooms
-            if not self.room_users[room_id]:
-                del self.room_users[room_id]
+    async def send_personal_message(self, room_id: str, user_id: str, message: dict) -> None:
+        if room_id in self.active_connections and user_id in self.active_connections[room_id]:
+            await self.active_connections[room_id][user_id].send_json(message)
+
+    async def broadcast_user_join(self, room_id: str, user_id: str) -> None:
+        await self.broadcast(room_id, {
+            "type": "user_join",
+            "user_id": user_id
+        }, exclude_user=user_id)
+
+    async def broadcast_user_leave(self, room_id: str, user_id: str) -> None:
+        await self.broadcast(room_id, {
+            "type": "user_leave",
+            "user_id": user_id
+        })
 
 
-# Global instance
 manager = ConnectionManager()

@@ -32,7 +32,7 @@ export function useWebSocket() {
     }
 
     function send(obj) {
-        if (!ws.value) return;
+        if (!ws.value || ws.value.readyState === WebSocket.CLOSING || ws.value.readyState === WebSocket.CLOSED) return;
         try {
             ws.value.send(JSON.stringify(obj));
         } catch (err) {

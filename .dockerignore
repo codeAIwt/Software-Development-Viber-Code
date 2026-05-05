@@ -16,3 +16,4 @@ dist
 *.log
 .pytest_cache
 __pycache__
+.trae/skills/

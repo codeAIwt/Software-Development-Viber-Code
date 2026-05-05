@@ -428,7 +428,15 @@ def leave_room(db: Session, user_id: str, room_id: str) -> dict:
 
         active_count = int(r.scard(active_key))
         new_current = active_count - 1
-        new_status = "closed" if new_current == 0 else "idle"
+        if new_current < 0:
+            new_current = 0
+        if new_current <= 0:
+            new_status = "closed"
+        else:
+            new_status = "idle"
+
+        is_creator = meta.get("creator_id") == user_id
+        print(f"[room_service.leave_room] active_count={active_count}, new_current={new_current}, new_status={new_status}, creator_id={meta.get('creator_id')}, leaving_user={user_id}, is_creator={is_creator}")
 
         # 计算学习时长
         join_time_str = r.get(cache.user_join_time_key(room_id, user_id))
@@ -589,13 +597,23 @@ def update_room_info(db: Session, user_id: str, room_id: str, theme: str = None)
     return get_room_info(db, room_id)
 
 def destroy_room(db: Session, user_id: str, room_id: str) -> dict:
+    """销毁房间业务处理：
+    1. 验证创建者权限
+    2. 计算并记录所有用户的学习时长
+    3. 强制所有用户离开（从active_key移除，记录离开时间）
+    4. 返回所有用户的学习数据供前端展示
+    注意：此函数不删除房间元数据，房间数据清理由 cleanup_destroyed_room 完成
+    """
+    print(f"[room_service.destroy_room] start: user_id={user_id}, room_id={room_id}")
     r = cache._redis()
     meta = cache.get_room_meta(room_id)
     if not meta:
+        print(f"[room_service.destroy_room] room not found: {room_id}")
         raise RoomServiceError(404, "房间不存在", {})
 
     # 检查是否是创建者
     if meta.get("creator_id") != user_id:
+        print(f"[room_service.destroy_room] not creator: user_id={user_id}, creator_id={meta.get('creator_id')}")
         raise RoomServiceError(403, "只有创建者可以销毁房间", {})
 
     # 获取房间内的所有用户
@@ -621,9 +639,8 @@ def destroy_room(db: Session, user_id: str, room_id: str) -> dict:
 
     pipe = r.pipeline()
 
-    # 强制所有用户离开房间
+    # 强制所有用户离开房间 - 记录离开时间
     for user in users:
-        # 记录离开时间和学习时长
         join_time_str = r.get(cache.user_join_time_key(room_id, user))
         if join_time_str:
             join_time = int(join_time_str)
@@ -634,25 +651,6 @@ def destroy_room(db: Session, user_id: str, room_id: str) -> dict:
     # 移除所有活跃用户
     pipe.srem(active_key, *users)
 
-    # 获取所有用户（包括已离开的）
-    all_users = r.smembers(cache.room_users_all_key(room_id))
-
-    # 删除房间meta，使其不可查询
-    pipe.delete(cache.room_meta_key(room_id))
-    pipe.delete(cache.room_users_all_key(room_id))
-    pipe.delete(active_key)
-
-    # 从空闲房间列表中移除
-    theme = meta.get("theme")
-    idle_zset_key = cache.rooms_idle_zset_key(theme)
-    pipe.zrem(idle_zset_key, room_id)
-
-    # 删除所有用户的加入时间、离开时间和学习时长
-    for u in all_users:
-        pipe.delete(cache.user_join_time_key(room_id, u))
-        pipe.delete(cache.user_leave_time_key(room_id, u))
-        pipe.delete(cache.user_study_duration_key(room_id, u))
-
     pipe.execute()
 
     return {
@@ -661,3 +659,33 @@ def destroy_room(db: Session, user_id: str, room_id: str) -> dict:
         "message": "房间已销毁",
         "users": user_study_data,
     }
+
+
+def cleanup_destroyed_room(room_id: str) -> None:
+    """清理已销毁房间的数据 - 在广播 room_destroyed 消息后调用"""
+    r = cache._redis()
+    meta = cache.get_room_meta(room_id)
+    if not meta:
+        print(f"[cleanup_destroyed_room] room {room_id} already deleted")
+        return
+
+    print(f"[cleanup_destroyed_room] cleaning up room {room_id}")
+
+    active_key = cache.room_users_active_key(room_id)
+    all_users = r.smembers(cache.room_users_all_key(room_id))
+    theme = meta.get("theme")
+    idle_zset_key = cache.rooms_idle_zset_key(theme)
+
+    pipe = r.pipeline()
+    pipe.delete(cache.room_meta_key(room_id))
+    pipe.delete(cache.room_users_all_key(room_id))
+    pipe.delete(active_key)
+    pipe.zrem(idle_zset_key, room_id)
+
+    for u in all_users:
+        pipe.delete(cache.user_join_time_key(room_id, u))
+        pipe.delete(cache.user_leave_time_key(room_id, u))
+        pipe.delete(cache.user_study_duration_key(room_id, u))
+
+    pipe.execute()
+    print(f"[cleanup_destroyed_room] room {room_id} cleanup completed")

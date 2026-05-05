@@ -43,6 +43,9 @@ export function createSignalingService() {
             try {
                 const message = JSON.parse(event.data);
                 console.log('[Signaling] onmessage:', message.type, message.user_id);
+                console.log('[Signaling] onmessage full:', JSON.stringify(message));
+                console.log('[Signaling] ws.readyState:', ws.value?.readyState);
+                console.log('[Signaling] connected.value:', connected.value);
                 onMessageCallback?.(message);
             } catch (err) {
                 console.error('[Signaling] parse error', err);
@@ -52,6 +55,7 @@ export function createSignalingService() {
         ws.value.onclose = () => {
             console.log('[Signaling] WebSocket onclose');
             connected.value = false;
+            console.log('[Signaling] calling onClose callback');
             onCloseCallback?.();
         };
 

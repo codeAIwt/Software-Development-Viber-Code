@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -18,6 +19,7 @@ from services import room_service
 from services.ai_service import detect_person
 from services.room_service import RoomServiceError
 from utils import auth as auth_utils
+from utils.ws_client import manager
 from utils import cache
 
 router = APIRouter()
@@ -148,7 +150,7 @@ def update_room(
     return _json_ok(data, "更新成功")
 
 @router.delete("/destroy/{room_id}")
-def destroy_room(
+async def destroy_room(
     room_id: str,
     user: User = Depends(auth_utils.get_current_user),
     db: Session = Depends(get_db),
@@ -157,6 +159,20 @@ def destroy_room(
         data = room_service.destroy_room(db, user.id, room_id)
     except RoomServiceError as e:
         return _json_err(_http_status_for_room_error(e.code), e.code, e.msg, e.data)
+    except Exception as e:
+        print(f"[destroy_room] destroy_room service failed: {e}")
+        return _json_err(500, 500, "销毁失败", {})
+
+    try:
+        await manager.broadcast_room_destroyed(room_id)
+    except Exception as e:
+        print(f"[destroy_room] broadcast_room_destroyed failed: {e}")
+
+    try:
+        room_service.cleanup_destroyed_room(room_id)
+    except Exception as e:
+        print(f"[destroy_room] cleanup_destroyed_room failed: {e}")
+
     return _json_ok(data, "销毁成功")
 
 

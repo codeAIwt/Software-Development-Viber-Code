@@ -14,6 +14,7 @@ from config.db import SessionLocal
 from starlette.concurrency import run_in_threadpool
 
 from ws.server import handle_websocket_session
+from utils.ws_client import manager
 
 
 @asynccontextmanager

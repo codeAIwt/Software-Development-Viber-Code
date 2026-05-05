@@ -27,9 +27,15 @@ class ConnectionManager:
 
     async def broadcast(self, room_id: str, message: dict, exclude_user: str = None) -> None:
         if room_id in self.active_connections:
+            recipients = []
             for user_id, connection in self.active_connections[room_id].items():
                 if user_id != exclude_user:
-                    await connection.send_json(message)
+                    recipients.append(user_id)
+                    try:
+                        await connection.send_json(message)
+                    except Exception as e:
+                        print(f"[ConnectionManager] failed to send to {user_id}: {e}")
+            print(f"[ConnectionManager] broadcast to room {room_id}, recipients: {recipients}, message: {message}")
 
     async def send_personal_message(self, room_id: str, user_id: str, message: dict) -> None:
         if room_id in self.active_connections and user_id in self.active_connections[room_id]:
@@ -42,10 +48,21 @@ class ConnectionManager:
         }, exclude_user=user_id)
 
     async def broadcast_user_leave(self, room_id: str, user_id: str) -> None:
+        print(f"[ConnectionManager] broadcast_user_leave: room_id={room_id}, user_id={user_id}")
+        print(f"[ConnectionManager] active_connections before broadcast: {list(self.active_connections.get(room_id, {}).keys())}")
         await self.broadcast(room_id, {
             "type": "user_leave",
             "user_id": user_id
         })
+        print(f"[ConnectionManager] broadcast_user_leave completed for {user_id}")
+
+    async def broadcast_room_destroyed(self, room_id: str) -> None:
+        print(f"[ConnectionManager] broadcast_room_destroyed: room_id={room_id}")
+        await self.broadcast(room_id, {
+            "type": "room_destroyed",
+            "room_id": room_id
+        })
+        print(f"[ConnectionManager] broadcast_room_destroyed completed")
 
 
 manager = ConnectionManager()

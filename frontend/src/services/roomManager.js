@@ -7,6 +7,7 @@ import { ref } from 'vue';
 import { createVideoStreamManager } from './videoStreamManager';
 import { createWebRTCConnection } from './webrtcConnection';
 import { createSignalingService } from './signalingService';
+import { EventTypes, roomMemberEventBus } from './roomMemberEventBus';
 
 export function createRoomManager() {
     const videoStreamManager = createVideoStreamManager();
@@ -15,6 +16,60 @@ export function createRoomManager() {
 
     const aiDetectionResults = ref({});
     const connectionStates = ref({});
+
+    const knownMembers = ref(new Set());
+    let isRoomDestroyed = false;
+
+    function handleMemberLeft(data) {
+        const userId = typeof data === 'string' ? data : data?.userId;
+        console.log('[RoomManager] handleMemberLeft (event bus)', userId);
+        console.log('[RoomManager] data type:', typeof data, 'data:', JSON.stringify(data));
+        console.log('[RoomManager] knownMembers before:', [...knownMembers.value]);
+        if (!userId) {
+            console.error('[RoomManager] handleMemberLeft: userId is undefined');
+            return;
+        }
+        knownMembers.value.delete(userId);
+        console.log('[RoomManager] knownMembers after delete:', [...knownMembers.value]);
+        handleUserLeave(userId);
+    }
+
+    function handleMemberJoined(data) {
+        const userId = typeof data === 'string' ? data : data?.userId;
+        console.log('[RoomManager] handleMemberJoined', userId);
+        if (!userId) return;
+        if (!knownMembers.value.has(userId)) {
+            knownMembers.value.add(userId);
+        }
+        handleUserJoin(userId);
+    }
+
+    roomMemberEventBus.on(EventTypes.MEMBER_LEFT, handleMemberLeft);
+    roomMemberEventBus.on(EventTypes.MEMBER_JOINED, handleMemberJoined);
+
+    function handleRoomClosed(data) {
+        console.log('[RoomManager] handleRoomClosed (event bus)', data);
+        if (isRoomDestroyed) {
+            console.log('[RoomManager] room already destroyed, skipping');
+            return;
+        }
+        isRoomDestroyed = true;
+        handleRoomDestroyed();
+    }
+
+    function handleRoomDestroyed() {
+        console.log('[RoomManager] handleRoomDestroyed');
+        roomMemberEventBus.emit(EventTypes.ROOM_CLOSED, {});
+        webrtcConnection.closeAll();
+        signalingService.close();
+        videoStreamManager.stopCamera();
+        aiDetectionResults.value = {};
+        connectionStates.value = {};
+        knownMembers.value = new Set();
+        roomMemberEventBus.off(EventTypes.ROOM_CLOSED, handleRoomClosed);
+    }
+
+    roomMemberEventBus.on(EventTypes.ROOM_CLOSED, handleRoomClosed);
 
     function handleSignalingMessage(message) {
         const { type, user_id, data } = message || {};
@@ -30,16 +85,24 @@ export function createRoomManager() {
                 console.log('[RoomManager] handling user_leave for', user_id);
                 handleUserLeave(user_id);
                 break;
+            case 'room_destroyed':
+                console.log('[RoomManager] handling room_destroyed');
+                handleRoomDestroyed();
+                break;
             case 'offer':
+                console.log('[RoomManager] handling offer from', user_id);
                 handleOffer(user_id, data);
                 break;
             case 'answer':
+                console.log('[RoomManager] handling answer from', user_id);
                 handleAnswer(user_id, data);
                 break;
             case 'ice_candidate':
+                console.log('[RoomManager] handling ice_candidate from', user_id);
                 handleIceCandidate(user_id, data);
                 break;
             case 'ai_detection':
+                console.log('[RoomManager] handling ai_detection from', user_id);
                 if (user_id) {
                     aiDetectionResults.value = {
                         ...aiDetectionResults.value,
@@ -146,16 +209,22 @@ export function createRoomManager() {
     }
 
     function handleUserLeave(remoteUserId) {
-        console.log('[RoomManager] handleUserLeave', remoteUserId);
+        console.log('[RoomManager] handleUserLeave START', remoteUserId);
         console.log('[RoomManager] remoteStreams before leave:', JSON.stringify(Object.keys(webrtcConnection.remoteStreams.value)));
+        console.log('[RoomManager] peerConnections before leave:', JSON.stringify(Object.keys(webrtcConnection.peerConnections.value)));
+        console.log('[RoomManager] calling closePeerConnection...');
 
         webrtcConnection.closePeerConnection(remoteUserId);
 
-        console.log('[RoomManager] remoteStreams after leave:', JSON.stringify(Object.keys(webrtcConnection.remoteStreams.value)));
+        console.log('[RoomManager] remoteStreams after closePeerConnection:', JSON.stringify(Object.keys(webrtcConnection.remoteStreams.value)));
+        console.log('[RoomManager] peerConnections after closePeerConnection:', JSON.stringify(Object.keys(webrtcConnection.peerConnections.value)));
 
         const newResults = { ...aiDetectionResults.value };
         delete newResults[remoteUserId];
         aiDetectionResults.value = newResults;
+
+        console.log('[RoomManager] aiDetectionResults after cleanup:', JSON.stringify(Object.keys(aiDetectionResults.value)));
+        console.log('[RoomManager] handleUserLeave END');
     }
 
     async function connectRoom(roomId, userId, callbacks = {}) {
@@ -190,11 +259,16 @@ export function createRoomManager() {
 
     function disconnectRoom() {
         console.log('[RoomManager] disconnectRoom called');
+        isRoomDestroyed = false;
+        roomMemberEventBus.off(EventTypes.MEMBER_LEFT, handleMemberLeft);
+        roomMemberEventBus.off(EventTypes.MEMBER_JOINED, handleMemberJoined);
+        roomMemberEventBus.off(EventTypes.ROOM_CLOSED, handleRoomClosed);
         webrtcConnection.closeAll();
         signalingService.close();
         videoStreamManager.stopCamera();
         aiDetectionResults.value = {};
         connectionStates.value = {};
+        knownMembers.value = new Set();
         console.log('[RoomManager] disconnectRoom completed');
     }
 

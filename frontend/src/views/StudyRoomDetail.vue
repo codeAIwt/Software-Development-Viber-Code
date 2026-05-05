@@ -1,6 +1,6 @@
 <script setup>
 import { useRoute, useRouter } from 'vue-router';
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { getToken } from '../utils/auth';
 import * as studyRoomApi from '../api/studyRoom';
 import * as userApi from '../api/user';
@@ -9,6 +9,7 @@ import { useUiStore } from '../store';
 import { createRoomManager } from '../services/roomManager';
 import { useRoomData } from '../composables/useRoomData';
 import { useAiDetection } from '../composables/useAiDetection';
+import { EventTypes, roomMemberEventBus } from '../services/roomMemberEventBus';
 import BookmarkPanel from '../components/BookmarkPanel.vue';
 
 const route = useRoute();
@@ -58,6 +59,15 @@ const roomManager = createRoomManager();
 const camera = roomManager.videoStreamManager;
 const remoteStreams = roomManager.remoteStreams;
 
+console.log('[StudyRoomDetail] remoteStreams is reactive ref:', remoteStreams);
+console.log('[StudyRoomDetail] remoteStreams entries:', Object.keys(remoteStreams.value));
+
+watch(() => remoteStreams.value, (newVal, oldVal) => {
+    console.log('[StudyRoomDetail] remoteStreams CHANGED');
+    console.log('[StudyRoomDetail] old keys:', Object.keys(oldVal || {}));
+    console.log('[StudyRoomDetail] new keys:', Object.keys(newVal || {}));
+}, { deep: true });
+
 // signaling (websocket + webRTC)
 const aiDetectionResults = roomManager.aiDetectionResults;
 
@@ -67,16 +77,23 @@ async function handleRoomClosed() {
   isLeaving.value = true;
   ai.stop();
   stopPolling();
-  try {
-    const res = await leaveRoom(route.params.id);
-    const data = res.data;
-    if (data.code === 200) {
-      ui.setPendingDuration({ duration: data.data.study_duration_minutes || 0, type: 'room_closed' });
-    } else {
+
+  const signalingStillConnected = roomManager.signalingService.isConnected();
+  if (signalingStillConnected) {
+    try {
+      const res = await leaveRoom(route.params.id);
+      const data = res.data;
+      if (data.code === 200) {
+        ui.setPendingDuration({ duration: data.data.study_duration_minutes || 0, type: 'room_closed' });
+      } else {
+        ui.setPendingDuration({ duration: 0, type: 'room_closed' });
+      }
+    } catch (e) {
+      console.error('handleRoomClosed error', e);
       ui.setPendingDuration({ duration: 0, type: 'room_closed' });
     }
-  } catch (e) {
-    console.error('handleRoomClosed error', e);
+  } else {
+    console.log('[handleRoomClosed] signaling already closed (room destroyed), skipping leaveRoom');
     ui.setPendingDuration({ duration: 0, type: 'room_closed' });
   }
   router.push('/study-room');
@@ -189,9 +206,12 @@ function closeDestroyDialog() { showDestroyDialog.value = false; }
 
 async function destroyRoom() {
   destroying.value = true;
+  console.log('[StudyRoomDetail] destroyRoom called, roomId:', route.params.id);
   try {
     stopPolling();
+    console.log('[StudyRoomDetail] calling destroyRoomApi...');
     const { data } = await destroyRoomApi(route.params.id);
+    console.log('[StudyRoomDetail] destroyRoomApi returned:', data);
     if (data.code === 200) {
       ai.stop();
       roomManager.disconnectRoom();
@@ -244,6 +264,8 @@ onMounted(async () => {
   const userId = currentUserId.value;
   roomManager.connectRoom(roomId, userId, { onError: (e) => console.error(e), onRoomClosed: handleRoomClosed });
 
+  roomMemberEventBus.on(EventTypes.ROOM_CLOSED, handleRoomClosed);
+
   startPolling(route.params.id, 5000, handleRoomClosed, () => isLeaving.value);
 
   ai.start();
@@ -257,6 +279,7 @@ onUnmounted(() => {
   ai.stop();
   roomManager.disconnectRoom();
   stopPolling();
+  roomMemberEventBus.off(EventTypes.ROOM_CLOSED, handleRoomClosed);
   try {
     window.removeEventListener('pagehide', handlePageHide);
   } catch (err) {}

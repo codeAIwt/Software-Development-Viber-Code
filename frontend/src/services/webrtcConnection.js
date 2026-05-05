@@ -112,12 +112,27 @@ export function createWebRTCConnection() {
     }
 
     function closePeerConnection(userId) {
+        console.log('[WebRTC] closePeerConnection called for', userId);
+        console.log('[WebRTC] peerConnections before:', Object.keys(peerConnections.value));
+        console.log('[WebRTC] remoteStreams before:', Object.keys(remoteStreams.value));
         const pc = peerConnections.value[userId];
+        const stream = remoteStreams.value[userId];
         if (pc) {
+            if (stream && stream.getVideoTracks) {
+                stream.getVideoTracks().forEach(track => {
+                    console.log('[WebRTC] stopping track:', track.id);
+                    track.stop();
+                });
+            }
             pc.close();
             delete peerConnections.value[userId];
             delete remoteStreams.value[userId];
+            console.log('[WebRTC] peerConnections after delete:', Object.keys(peerConnections.value));
+            console.log('[WebRTC] remoteStreams after delete:', Object.keys(remoteStreams.value));
             remoteStreams.value = { ...remoteStreams.value };
+            console.log('[WebRTC] remoteStreams after reassign:', Object.keys(remoteStreams.value));
+        } else {
+            console.log('[WebRTC] no peerConnection found for', userId);
         }
     }
 

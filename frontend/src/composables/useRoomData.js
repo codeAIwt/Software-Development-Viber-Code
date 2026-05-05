@@ -1,6 +1,7 @@
 import { ref } from 'vue';
 import * as studyRoomApi from '../api/studyRoom';
 import * as userApi from '../api/user';
+import { EventTypes, roomMemberEventBus } from '../services/roomMemberEventBus';
 
 export function useRoomData() {
     const roomInfo = ref({
@@ -20,6 +21,7 @@ export function useRoomData() {
     const loadingCreatorInfo = ref(false);
 
     const roomInfoTimer = ref(null);
+    const previousUsers = ref(new Set());
 
     async function getUserInfo(userId) {
         if (userInfoMap.value.has(userId)) return userInfoMap.value.get(userId);
@@ -65,8 +67,7 @@ export function useRoomData() {
 
     function startPolling(roomId, intervalMs = 5000, onClosed, isLeavingGetter = null) {
         if (roomInfoTimer.value) clearInterval(roomInfoTimer.value);
-        let consecutive404Count = 0;
-        const MAX_404_BEFORE_CLOSED = 3;
+        previousUsers.value = new Set(roomInfo.value.users || []);
 
         roomInfoTimer.value = setInterval(async () => {
             const res = await fetchRoomInfo(roomId);
@@ -74,30 +75,47 @@ export function useRoomData() {
             if (isLeavingGetter && isLeavingGetter()) {
                 clearInterval(roomInfoTimer.value);
                 roomInfoTimer.value = null;
-                consecutive404Count = 0;
+                previousUsers.value = new Set();
                 return;
             }
 
             if (res.ok && res.closed) {
                 clearInterval(roomInfoTimer.value);
                 roomInfoTimer.value = null;
-                consecutive404Count = 0;
+                roomMemberEventBus.emit(EventTypes.ROOM_CLOSED, { roomId });
                 onClosed?.();
                 return;
             }
 
             if (res.status === 404) {
-                consecutive404Count++;
-                if (consecutive404Count >= MAX_404_BEFORE_CLOSED) {
-                    clearInterval(roomInfoTimer.value);
-                    roomInfoTimer.value = null;
-                    consecutive404Count = 0;
-                    if (!isLeavingGetter || !isLeavingGetter()) {
-                        onClosed?.();
-                    }
+                console.warn(`[useRoomData] room ${roomId} not found (404), treating as closed`);
+                clearInterval(roomInfoTimer.value);
+                roomInfoTimer.value = null;
+                previousUsers.value = new Set();
+                if (!isLeavingGetter || !isLeavingGetter()) {
+                    roomMemberEventBus.emit(EventTypes.ROOM_CLOSED, { roomId });
+                    onClosed?.();
                 }
             } else {
-                consecutive404Count = 0;
+                const currentUsers = new Set(roomInfo.value.users || []);
+                const joinedUsers = [...currentUsers].filter(u => !previousUsers.value.has(u));
+                const leftUsers = [...previousUsers.value].filter(u => !currentUsers.has(u));
+
+                if (joinedUsers.length > 0) {
+                    console.log('[useRoomData] members joined:', joinedUsers);
+                    joinedUsers.forEach(userId => {
+                        roomMemberEventBus.emit(EventTypes.MEMBER_JOINED, { userId });
+                    });
+                }
+
+                if (leftUsers.length > 0) {
+                    console.log('[useRoomData] members left:', leftUsers);
+                    leftUsers.forEach(userId => {
+                        roomMemberEventBus.emit(EventTypes.MEMBER_LEFT, { userId });
+                    });
+                }
+
+                previousUsers.value = currentUsers;
             }
         }, intervalMs);
     }
@@ -107,6 +125,7 @@ export function useRoomData() {
             clearInterval(roomInfoTimer.value);
             roomInfoTimer.value = null;
         }
+        previousUsers.value = new Set();
     }
 
     async function leaveRoom(roomId) {

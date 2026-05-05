@@ -1,19 +1,81 @@
-.github
-.vscode
-.idea
-*.md
-docs
-tests
-venv
-env
-.env
-.git
+# ========== Git ==========
+.git/
 .gitignore
-Dockerfile.*
-docker-compose.yml
-node_modules
-dist
+
+# ========== IDE & Editor ==========
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+.DS_Store
+
+# ========== Environment Files (.env is excluded, .env.example is NOT) ==========
+.env
+.env.local
+.env.production
+
+# ========== Documentation (not needed in container) ==========
+*.md
+docs/
+
+# ========== CI/CD ==========
+.github/
+
+# ========== Python (will be rebuilt in container) ==========
+**/__pycache__/
+**/*.py[cod]
+*.egg-info/
+*.egg
+.pytest_cache/
+.tox/
+.hypothesis/
+
+# ========== Node.js (will be rebuilt in container) ==========
+node_modules/
+frontend/node_modules/
+*.tgz
+.npm
+.yarn-integrity
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# ========== Build Artifacts (will be rebuilt in container) ==========
+.vite/
+frontend/.vite/
+.parcel-cache/
+dist/
+build/
+
+# ========== Test & Report Files ==========
+tests/
+test-results/
+*.test_results.xml
+test-summary.md
+integration_test.py
+integration_test_report.md
+htmlcov/
+.coverage
+.coverage.*
+
+# ========== Performance & Stress Tests ==========
+performance_test.py
+run_performance_test.py
+performance_test_report.md
+locust_report.html
+*.perf.*
+
+# ========== Logs ==========
+logs/
 *.log
-.pytest_cache
-__pycache__
+
+# ========== Temporary Files ==========
+*.tmp
+*.temp
+temp/
+tmp/
+dump.rdb
+
+# ========== Skills (Trae AI specific) ==========
 .trae/skills/

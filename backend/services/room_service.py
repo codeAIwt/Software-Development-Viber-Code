@@ -611,47 +611,76 @@ def destroy_room(db: Session, user_id: str, room_id: str) -> dict:
         print(f"[room_service.destroy_room] room not found: {room_id}")
         raise RoomServiceError(404, "房间不存在", {})
 
-    # 检查是否是创建者
     if meta.get("creator_id") != user_id:
         print(f"[room_service.destroy_room] not creator: user_id={user_id}, creator_id={meta.get('creator_id')}")
         raise RoomServiceError(403, "只有创建者可以销毁房间", {})
 
-    # 获取房间内的所有用户
     active_key = cache.room_users_active_key(room_id)
     users = r.smembers(active_key)
 
     now_ms = _now_ms()
+    beijing_timezone = timezone(timedelta(hours=8))
+    today = datetime.now(beijing_timezone).date()
 
-    # 计算每个用户的学习时长
     user_study_data = []
+    study_duration_records = []
+    redis_operations = []
+
     for user in users:
         join_time_str = r.get(cache.user_join_time_key(room_id, user))
         if join_time_str:
             join_time = int(join_time_str)
             study_duration = now_ms - join_time
+            study_duration_minutes = study_duration // 60000
             user_study_data.append({
                 "user_id": user,
                 "join_time": join_time,
                 "leave_time": now_ms,
                 "study_duration": study_duration,
-                "study_duration_minutes": study_duration // 60000
+                "study_duration_minutes": study_duration_minutes
             })
+
+            redis_operations.append({
+                "user": user,
+                "leave_time": now_ms,
+                "study_duration": study_duration
+            })
+
+            if study_duration_minutes > 0:
+                study_duration_records.append({
+                    "user_id": user,
+                    "study_date": today,
+                    "total_minutes": study_duration_minutes
+                })
 
     pipe = r.pipeline()
 
-    # 强制所有用户离开房间 - 记录离开时间
-    for user in users:
-        join_time_str = r.get(cache.user_join_time_key(room_id, user))
-        if join_time_str:
-            join_time = int(join_time_str)
-            study_duration = now_ms - join_time
-            pipe.set(cache.user_leave_time_key(room_id, user), str(now_ms))
-            pipe.set(cache.user_study_duration_key(room_id, user), str(study_duration))
+    for op in redis_operations:
+        pipe.set(cache.user_leave_time_key(room_id, op["user"]), str(op["leave_time"]))
+        pipe.set(cache.user_study_duration_key(room_id, op["user"]), str(op["study_duration"]))
 
-    # 移除所有活跃用户
     pipe.srem(active_key, *users)
-
     pipe.execute()
+
+    for record in study_duration_records:
+        existing_record = db.query(StudyDuration).filter(
+            StudyDuration.user_id == record["user_id"],
+            StudyDuration.study_date == record["study_date"]
+        ).first()
+
+        if existing_record:
+            existing_record.total_minutes = min(existing_record.total_minutes + record["total_minutes"], 1440)
+        else:
+            new_record = StudyDuration(
+                user_id=record["user_id"],
+                study_date=record["study_date"],
+                total_minutes=min(record["total_minutes"], 1440),
+                beat_percent=None,
+                create_time=datetime.now(beijing_timezone)
+            )
+            db.add(new_record)
+
+    db.commit()
 
     return {
         "room_id": room_id,
